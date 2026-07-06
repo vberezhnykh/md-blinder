@@ -1,0 +1,527 @@
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+  text-align: left;
+}
+
+.app-header h1 {
+  margin-bottom: 4px;
+}
+
+.app-header p {
+  color: var(--pico-muted-color);
+  margin-top: 0;
+}
+
+.dropzone {
+  border: 2px dashed var(--pico-muted-border-color);
+  border-radius: 10px;
+  padding: 48px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+  margin-top: 24px;
+}
+
+.dropzone.dragging {
+  border-color: var(--pico-primary);
+  background-color: var(--pico-primary-focus);
+}
+
+.dropzone.loading {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.dropzone .filename {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.dropzone-hint {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--pico-muted-color);
+}
+
+.compact-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-top: 24px;
+  margin-bottom: 16px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 8px;
+}
+
+.compact-bar.dragging {
+  border-color: var(--pico-primary);
+  background: var(--pico-primary-background, rgba(0, 0, 0, 0.03));
+}
+
+.compact-bar .filename-compact {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--pico-muted-color);
+  font-size: 14px;
+}
+
+.compact-bar button {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.history-panel { margin-top: 24px; }
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.history-header h3 { margin: 0; }
+.history-header button {
+  margin: 0;
+  width: auto;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.history-error { color: #e5484d; font-size: 13px; margin: 8px 0 0; }
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.history-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.history-meta {
+  flex: 0 0 auto;
+  color: var(--pico-muted-color);
+  font-size: 12px;
+}
+.history-row button {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.history-row .history-delete {
+  border: none;
+  background: transparent;
+  color: var(--pico-muted-color);
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.status {
+  margin-top: 16px;
+}
+
+.status-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--pico-muted-color);
+}
+
+.status-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status.error {
+  color: #e5484d;
+  white-space: pre-wrap;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--pico-muted-border-color);
+  border-top-color: var(--pico-primary);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.result {
+  margin-top: 32px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.markdown-preview {
+  width: 100%;
+  min-height: 420px;
+  margin-top: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 16px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid var(--pico-muted-border-color);
+  resize: vertical;
+}
+
+.ner-notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #b58900;
+  background-color: rgba(181, 137, 0, 0.1);
+  color: #b58900;
+  font-size: 13px;
+}
+
+.view-toggle {
+  display: inline-flex;
+  margin-top: 16px;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.view-toggle button {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--pico-muted-color);
+}
+
+.view-toggle button + button {
+  border-left: 1px solid var(--pico-muted-border-color);
+}
+
+.view-toggle button.active {
+  background-color: var(--pico-primary-background);
+  color: var(--pico-primary-inverse);
+}
+
+.replacement-section {
+  margin-top: 28px;
+}
+
+.replacement-section h3 {
+  margin-bottom: 8px;
+}
+
+.replacement-table-wrap {
+  overflow-x: auto;
+}
+
+.replacement-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.replacement-table th,
+.replacement-table td {
+  border: 1px solid var(--pico-muted-border-color);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.replacement-table th {
+  font-weight: 600;
+}
+
+.replacement-table .cell-placeholder {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.replacement-table .cell-value {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-layout {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  align-items: flex-start;
+}
+
+@media (max-width: 900px) {
+  .editor-layout {
+    flex-direction: column;
+  }
+}
+
+.editor-pane {
+  flex: 2 1 0;
+  min-width: 0;
+}
+
+.entity-pane {
+  flex: 1 1 320px;
+  min-width: 260px;
+  position: sticky;
+  top: 8px;
+  align-self: flex-start;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.editor-pane .cm-editor {
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 8px;
+  min-height: 420px;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.editor-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.cm-entity {
+  border-radius: 3px;
+  padding: 0 1px;
+  cursor: default;
+}
+
+:root {
+  --ent-PERSON: rgba(42, 120, 214, 0.30);
+  --ent-COMPANY: rgba(237, 161, 0, 0.30);
+  --ent-ADDRESS: rgba(0, 131, 0, 0.30);
+  --ent-REG_NUMBER: rgba(74, 58, 167, 0.32);
+  --ent-IBAN: rgba(27, 175, 122, 0.30);
+  --ent-SWIFT: rgba(232, 123, 164, 0.34);
+  --ent-ACCOUNT: rgba(235, 104, 52, 0.30);
+  --ent-CARD: rgba(227, 73, 72, 0.30);
+  --ent-EMAIL: rgba(14, 155, 184, 0.30);
+  --ent-PHONE: rgba(138, 109, 59, 0.34);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ent-PERSON: rgba(57, 135, 229, 0.45);
+    --ent-COMPANY: rgba(201, 133, 0, 0.48);
+    --ent-ADDRESS: rgba(47, 170, 47, 0.45);
+    --ent-REG_NUMBER: rgba(144, 133, 233, 0.45);
+    --ent-IBAN: rgba(25, 158, 112, 0.45);
+    --ent-SWIFT: rgba(213, 81, 129, 0.45);
+    --ent-ACCOUNT: rgba(217, 89, 38, 0.45);
+    --ent-CARD: rgba(230, 103, 103, 0.45);
+    --ent-EMAIL: rgba(57, 167, 194, 0.45);
+    --ent-PHONE: rgba(176, 141, 79, 0.48);
+  }
+}
+
+.cm-entity-PERSON { background-color: var(--ent-PERSON); }
+.cm-entity-COMPANY { background-color: var(--ent-COMPANY); }
+.cm-entity-ADDRESS { background-color: var(--ent-ADDRESS); }
+.cm-entity-REG_NUMBER { background-color: var(--ent-REG_NUMBER); }
+.cm-entity-IBAN { background-color: var(--ent-IBAN); }
+.cm-entity-SWIFT { background-color: var(--ent-SWIFT); }
+.cm-entity-ACCOUNT { background-color: var(--ent-ACCOUNT); }
+.cm-entity-CARD { background-color: var(--ent-CARD); }
+.cm-entity-EMAIL { background-color: var(--ent-EMAIL); }
+.cm-entity-PHONE { background-color: var(--ent-PHONE); }
+
+.cm-entity-inactive {
+  background: none !important;
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.cm-entity-tooltip {
+  padding: 4px 8px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 4px;
+  max-width: 360px;
+  white-space: pre-wrap;
+}
+
+.entity-pane h3 {
+  margin-bottom: 8px;
+}
+
+.entity-pane .text-muted {
+  color: var(--pico-muted-color);
+}
+
+.entity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  font-size: 13px;
+}
+
+.entity-row .cell-placeholder {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  /* Pico стилизует [role="button"] как кнопку — сбрасываем до обычного текста */
+  display: inline;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.entity-row select {
+  flex: 0 0 auto;
+  max-width: 120px;
+  font-size: 12px;
+}
+
+.entity-row .cell-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-row .cell-count {
+  flex: 0 0 auto;
+  color: var(--pico-muted-color);
+  font-size: 12px;
+}
+
+.entity-row .entity-delete {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--pico-muted-color);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+.entity-row .entity-delete:hover {
+  color: #e5484d;
+}
+
+.anonymized-preview {
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* Neutralize Pico's default spacing on form elements inside our flex rows */
+.result-actions button,
+.view-toggle button,
+.editor-toolbar button,
+.editor-toolbar select,
+.entity-row input,
+.entity-row select,
+.entity-row button {
+  margin-bottom: 0;
+  width: auto;
+}
+
+.entity-row input[type='checkbox'] {
+  margin-bottom: 0;
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.entity-row .cell-placeholder {
+  cursor: pointer;
+}
+
+.entity-row .cell-placeholder:hover {
+  text-decoration: underline;
+}
+
+.cm-panels {
+  background: var(--pico-card-background-color, #fff);
+  color: inherit;
+  border-top: 1px solid var(--pico-muted-border-color);
+  font-size: 12px;
+}
+
+.cm-panel.cm-search {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 32px 8px 10px;
+}
+
+.cm-panel.cm-search input,
+.cm-panel.cm-search button {
+  margin: 0;
+  width: auto;
+  height: auto;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cm-panel.cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.cm-panel.cm-search button[name="close"] {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  padding: 0 6px;
+  font-size: 18px;
+  line-height: 1.2;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
