@@ -25,3 +25,6 @@ dist-ssr
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Local-only test documents (contain PII-like data — NEVER commit)
+test-samples/
