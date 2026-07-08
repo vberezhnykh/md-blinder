@@ -88,6 +88,12 @@ describe('detectStructural', () => {
     expect(regNumbers[0].value).toBe('08145531')
   })
 
+  it('detects a hyphenated company registration number from context', () => {
+    const matches = detectStructural('company registration number: 01-09-391554')
+    const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+    expect(regNumbers.some((m) => m.value === '01-09-391554')).toBe(true)
+  })
+
   it('detects an EIN as a registration number', () => {
     const matches = detectStructural('EIN 12-3456789')
     const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
@@ -146,5 +152,27 @@ describe('detectStructural', () => {
     const matches = detectStructural('Call 020 7946 0018 now')
     const phones = matches.filter((m) => m.type === 'PHONE')
     expect(phones.some((m) => m.value === '020 7946 0018')).toBe(true)
+  })
+
+  it('detects a phone number with a 5-digit group', () => {
+    const matches = detectStructural('Phone #: 55 11 90000-0000')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '55 11 90000-0000')).toBe(true)
+  })
+
+  it('does not treat a Brazilian CEP postal code as a phone number', () => {
+    const matches = detectStructural('CEP 00.000-000, Example City')
+    expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+  })
+
+  it('does not treat an 8-letter word as a SWIFT code without context', () => {
+    const matches = detectStructural('ACME LIMITED')
+    expect(matches.some((m) => m.type === 'SWIFT')).toBe(false)
+  })
+
+  it('detects a SWIFT code with BIC context keyword', () => {
+    const matches = detectStructural('BIC: DEUTDEFF')
+    const swifts = matches.filter((m) => m.type === 'SWIFT')
+    expect(swifts.some((m) => m.value === 'DEUTDEFF')).toBe(true)
   })
 })

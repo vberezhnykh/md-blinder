@@ -103,10 +103,16 @@ function detectSwift(text: string): RawMatch[] {
   const matches: RawMatch[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    const country = m[0].slice(4, 6)
-    if (ISO_COUNTRY_CODES.has(country)) {
-      matches.push({ type: 'SWIFT', value: m[0], start: m.index, end: m.index + m[0].length })
+    const code = m[0]
+    const country = code.slice(4, 6)
+    if (!ISO_COUNTRY_CODES.has(country)) continue
+    const hasBranch = code.length === 11
+    const isAllAlpha = /^[A-Z]+$/.test(code)
+    if (!hasBranch && isAllAlpha) {
+      const hasContext = /(?:SWIFT|BIC)\b[^A-Za-z0-9]{0,10}$/i.test(text.slice(0, m.index))
+      if (!hasContext) continue
     }
+    matches.push({ type: 'SWIFT', value: code, start: m.index, end: m.index + code.length })
   }
   return matches
 }
@@ -120,13 +126,18 @@ function isDateLike(s: string): boolean {
   return false
 }
 
+function isCepLike(s: string): boolean {
+  return /^\d{2}\.\d{3}-\d{3}$/.test(s.trim())
+}
+
 function detectPhone(text: string): RawMatch[] {
-  const re = /(?:\+\d{1,3}[\s.-]?)?(?:\(\d{1,4}\)[\s.-]?)?\d{2,4}(?:[\s.-]\d{2,4}){1,4}/g
+  const re = /(?:\+\d{1,3}[\s.-]?)?(?:\(\d{1,4}\)[\s.-]?)?\d{2,5}(?:[\s.-]\d{2,5}){1,4}/g
   const matches: RawMatch[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
     const raw = m[0]
     if (isDateLike(raw)) continue
+    if (isCepLike(raw)) continue
     const digits = raw.replace(/\D/g, '')
     if (digits.length < 7 || digits.length > 15) continue
     const isAllDigitsNoSep = /^\d+$/.test(raw)
@@ -151,7 +162,7 @@ function detectAccount(text: string): RawMatch[] {
 function detectRegNumber(text: string): RawMatch[] {
   const matches: RawMatch[] = []
   const contextPatterns = [
-    /\b(?:company\s+(?:registration\s+)?(?:no|number)|reg(?:istration)?\.?\s*no|CRN|registered\s+number)\b[\s:#.]*([A-Z0-9]{6,12})/gi,
+    /\b(?:company\s+(?:registration\s+)?(?:no|number)|reg(?:istration)?\.?\s*no|CRN|registered\s+number)\b[\s:#.]*([A-Z0-9][A-Z0-9./-]{4,18}[A-Z0-9])/gi,
     /\bVAT(?:\s*(?:reg(?:istration)?|no|number|id))?\b[\s:#.]*([A-Z]{0,2}[\d][\d ]{6,14}\d)/gi,
   ]
   for (const re of contextPatterns) {
