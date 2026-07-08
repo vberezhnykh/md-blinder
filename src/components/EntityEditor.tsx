@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { Decoration, type DecorationSet, hoverTooltip } from '@codemirror/view'
@@ -13,6 +14,13 @@ interface EntityEditorProps {
   selectedType: EntityType
   onSelectedTypeChange: (t: EntityType) => void
   reveal?: { from: number; to: number; nonce: number } | null
+}
+
+interface SelectionPopupState {
+  from: number
+  to: number
+  left: number
+  top: number
 }
 
 const setEntitiesEffect = StateEffect.define<Entity[]>()
@@ -73,18 +81,30 @@ function EntityEditor({
   const onChangeRef = useRef(onChange)
   const onAddEntityRef = useRef(onAddEntity)
   const [hasSelection, setHasSelection] = useState(false)
+  const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
+  const selectionPopupRef = useRef<SelectionPopupState | null>(null)
 
   entitiesRef.current = entities
   valueRef.current = value
   onChangeRef.current = onChange
   onAddEntityRef.current = onAddEntity
+  selectionPopupRef.current = selectionPopup
 
   useEffect(() => {
     if (!mountRef.current) return
 
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.selectionSet) {
-        setHasSelection(!update.state.selection.main.empty)
+        const sel = update.state.selection.main
+        setHasSelection(!sel.empty)
+        if (sel.empty) {
+          setSelectionPopup(null)
+        } else {
+          const coords = update.view.coordsAtPos(sel.to)
+          setSelectionPopup(
+            coords ? { from: sel.from, to: sel.to, left: coords.left, top: coords.bottom + 6 } : null,
+          )
+        }
       }
       if (!update.docChanged) return
       const changes = update.changes
@@ -138,7 +158,20 @@ function EntityEditor({
     viewRef.current = view
     view.dispatch({ effects: setEntitiesEffect.of(entitiesRef.current) })
 
+    const handleScroll = () => {
+      const current = selectionPopupRef.current
+      if (!current) return
+      const coords = view.coordsAtPos(current.to)
+      if (!coords) {
+        setSelectionPopup(null)
+        return
+      }
+      setSelectionPopup({ ...current, left: coords.left, top: coords.bottom + 6 })
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true })
+
     return () => {
+      window.removeEventListener('scroll', handleScroll, true)
       view.destroy()
       viewRef.current = null
     }
@@ -179,6 +212,12 @@ function EntityEditor({
     if (from < to) onAddEntityRef.current(from, to)
   }
 
+  const handleAddFromPopup = () => {
+    if (!selectionPopup) return
+    onAddEntityRef.current(selectionPopup.from, selectionPopup.to)
+    setSelectionPopup(null)
+  }
+
   return (
     <div className="editor-pane">
       <div className="editor-toolbar">
@@ -197,6 +236,30 @@ function EntityEditor({
         </button>
       </div>
       <div ref={mountRef} />
+      {selectionPopup &&
+        createPortal(
+          <div
+            className="cm-add-popup"
+            style={{ left: selectionPopup.left, top: selectionPopup.top }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <select
+              value={selectedType}
+              onChange={(e) => onSelectedTypeChange(e.target.value as EntityType)}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {ALL_ENTITY_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={handleAddFromPopup}>
+              ＋
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

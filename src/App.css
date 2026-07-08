@@ -319,6 +319,34 @@
   margin-bottom: 8px;
 }
 
+.cm-add-popup {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  background: var(--pico-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.cm-add-popup select {
+  font-size: 12px;
+  padding: 2px 4px;
+  margin: 0;
+  height: auto;
+}
+
+.cm-add-popup button {
+  font-size: 12px;
+  padding: 2px 8px;
+  margin: 0;
+  height: auto;
+  line-height: 1.4;
+}
+
 .cm-entity {
   border-radius: 3px;
   padding: 0 1px;
