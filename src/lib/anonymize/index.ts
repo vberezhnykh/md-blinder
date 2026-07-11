@@ -95,6 +95,37 @@ export async function anonymizeMarkdown(
     group.positions.push({ start: m.start, end: m.end })
   }
 
+  // Поглощение вложенных ADDRESS-спанов: NER на разных вхождениях отдаёт адрес
+  // разной длины ("ROOM C05" против "ROOM C05, FLAT A, …"). Если нормализованное
+  // значение одного адреса — подстрока другого, сливаем короткий в длинный
+  // (объединяя позиции), чтобы не плодить дубль-сущности и фрагменты-extra.
+  const addrGroups = [...groups.values()]
+    .filter((g) => g.type === 'ADDRESS')
+    .sort((a, b) => b.firstValue.length - a.firstValue.length) // длинные первыми
+  const absorbed = new Set<Group>()
+  for (let i = 0; i < addrGroups.length; i++) {
+    const long = addrGroups[i]
+    if (absorbed.has(long)) continue
+    const longNorm = normalizeValue('ADDRESS', long.firstValue)
+    for (let j = i + 1; j < addrGroups.length; j++) {
+      const short = addrGroups[j]
+      if (absorbed.has(short)) continue
+      const shortNorm = normalizeValue('ADDRESS', short.firstValue)
+      if (longNorm.includes(shortNorm)) {
+        // Вливаем только непересекающиеся позиции, чтобы не получить две замены
+        // на одном месте (splice в buildAnonymizedText их бы задвоил).
+        for (const sp of short.positions) {
+          if (!long.positions.some((lp) => sp.start < lp.end && lp.start < sp.end)) {
+            long.positions.push(sp)
+          }
+        }
+        long.firstStart = Math.min(long.firstStart, short.firstStart)
+        absorbed.add(short)
+      }
+    }
+  }
+  for (const g of absorbed) groups.delete(`${g.type} ${normalizeValue(g.type, g.firstValue)}`)
+
   const orderedGroups = [...groups.values()].sort((a, b) => a.firstStart - b.firstStart)
 
   const typeCounters = new Map<EntityType, number>()

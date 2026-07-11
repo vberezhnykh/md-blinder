@@ -13,12 +13,17 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
   let run: { start: number; end: number } | null = null
 
   const bridgeable = (prevEnd: number, nextStart: number): boolean => {
-    if (nextStart < prevEnd) return true // перекрытие
+    if (nextStart <= prevEnd) return true // перекрытие / вплотную
     const gap = text.slice(prevEnd, nextStart)
-    if (gap.length > 30) return false
     if (/\n[ \t]*\n/.test(gap)) return false // граница абзаца
-    if (/[.!?]\s/.test(gap)) return false // граница предложения
-    return true
+    // Граница предложения — точка/!/? затем пробел и НЕ-цифра. Первый символ
+    // следующего фрагмента лежит за срезом gap, поэтому пробуем gap + этот символ.
+    // Точку ПЕРЕД цифрой (сокращения адреса: "No. 1912", "Fsz. 2nd") за границу
+    // НЕ считаем — предложения с цифры не начинаются.
+    const probe = gap + (text[nextStart] ?? '')
+    if (/[.!?]["')\]]?\s+[^\d\s]/u.test(probe)) return false
+    if (gap.length <= 45) return true // адреса длинные; зазор увеличен с 30
+    return false
   }
 
   const flush = () => {

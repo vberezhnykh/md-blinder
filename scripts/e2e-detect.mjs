@@ -16,7 +16,10 @@ if (!baseUrl || files.length === 0) {
 const browser = await chromium.launch()
 const results = {}
 
+let fileIndex = 0
 for (const file of files) {
+  fileIndex++
+  console.error(`[start] (${fileIndex}/${files.length}) ${basename(file)}`)
   const context = await browser.newContext()
   const page = await context.newPage()
   const errors = []
@@ -35,13 +38,22 @@ for (const file of files) {
   // hand — mirrors the proven debug flow. NER can take ~2 min per file.
   let sawLoading = false
   let finished = false
-  const deadline = Date.now() + 360000
+  const started = Date.now()
+  const deadline = started + 360000
+  let lastBeat = 0
   while (Date.now() < deadline) {
     await page.waitForTimeout(1500)
     const loading = await page.$('.status-loading').then((el) => !!el)
     const result = await page.$('.result').then((el) => !!el)
     const err = await page.$('.status.error').then((el) => !!el)
     if (loading) sawLoading = true
+    // Heartbeat every ~10s so a long NER run visibly progresses (and a hang is obvious).
+    const elapsed = Math.round((Date.now() - started) / 1000)
+    if (elapsed - lastBeat >= 10) {
+      lastBeat = elapsed
+      const phase = loading ? 'processing' : sawLoading ? 'settling' : 'uploading'
+      console.error(`  ...${basename(file)} [${phase}] ${elapsed}s elapsed`)
+    }
     if (!loading && (result || err) && (sawLoading || err)) {
       finished = true
       break

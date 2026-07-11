@@ -44,6 +44,24 @@ describe('stitchAddressRuns', () => {
     expect(result[0].value).toBe(text.slice(result[0].start, result[0].end))
   })
 
+  it('merges across an abbreviation dot before a digit ("No. 1912")', () => {
+    const text = 'at Example Avenue, No. 1, Suite 1 today'
+    const frag1 = 'Example Avenue'
+    const frag2 = 'Sala 61'
+    const start1 = text.indexOf(frag1)
+    const start2 = text.indexOf(frag2)
+
+    const matches: RawMatch[] = [
+      { type: 'ADDRESS', value: frag1, start: start1, end: start1 + frag1.length },
+      { type: 'ADDRESS', value: frag2, start: start2, end: start2 + frag2.length },
+    ]
+
+    const result = stitchAddressRuns(matches, text)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].value).toBe('Example Avenue, No. 1, Suite 1')
+  })
+
   it('does not merge ADDRESS fragments separated by a paragraph boundary', () => {
     const text = 'MAIN ST\n\nSECOND AVE'
     const frag1 = 'MAIN ST'

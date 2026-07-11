@@ -109,3 +109,16 @@ for (const [file, r] of Object.entries(report)) {
 
 console.log('\n' + '#'.repeat(70))
 console.log('TOTALS:', JSON.stringify(totals))
+
+// ---- headline metric ----
+// Recall-first score (spec prioritises recall): a full HIT = 1 point, a PARTIAL
+// (right entity, truncated value) = 0.5, MISS/TYPE_MISMATCH = 0. Denominator is
+// the gold entity count. Extras (false positives) are reported separately as a
+// precision signal — they are NOT subtracted, so the two numbers move independently.
+const goldTotal = totals.HIT + totals.PARTIAL + totals.TYPE_MISMATCH + totals.MISS
+const recall = goldTotal ? (totals.HIT + 0.5 * totals.PARTIAL) / goldTotal : 0
+const strict = goldTotal ? totals.HIT / goldTotal : 0
+console.log(`GOLD ENTITIES: ${goldTotal}`)
+console.log(`DETECTION SCORE (recall, PARTIAL=0.5): ${(recall * 100).toFixed(1)}%`)
+console.log(`STRICT SCORE (full HITs only):        ${(strict * 100).toFixed(1)}%`)
+console.log(`FALSE POSITIVES (extras): ${totals.extras}`)

@@ -28,3 +28,9 @@ dist-ssr
 
 # Local-only test documents (contain PII-like data — NEVER commit)
 test-samples/
+
+# Spec kept local-only
+spec.md
+
+# Detection baseline — contains PII from sample contracts, local-only
+BASELINE.md
