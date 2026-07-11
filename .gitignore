@@ -40,6 +40,7 @@ out*.json
 score*.txt
 progress*.log
 
-# Unit tests — local-only (fixtures carry sample-contract PII; not shipped to the repo)
-*.test.ts
-*.test.tsx
+# Local-only tests bound to the confidential corpus (real-document fixtures carry
+# sample-contract PII). Synthetic unit tests (*.test.ts with inline fake data) are
+# committed and run in CI; anything that reads test-samples/ lives here instead.
+tests/local/

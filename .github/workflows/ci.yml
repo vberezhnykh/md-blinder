@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# The golden harness (scripts/e2e-detect.mjs + scripts/score.mjs) runs against the
+# confidential local corpus in test-samples/ and is deliberately NOT run in CI.
+# CI covers only lint + the synthetic unit tests on the clean core.
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
