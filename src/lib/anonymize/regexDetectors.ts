@@ -172,6 +172,11 @@ function detectAddress(text: string): RawMatch[] {
   // Ключевые слова следующего поля в той же строке — по ним обрезаем хвост значения.
   const fieldRe =
     /,\s*(?:company\s+(?:registration|reg)\b|registration\s+(?:no|number)\b|reg\.?\s*(?:no|number)\b|CRN\b|VAT\b|represented\s+by\b|acting\b|director\b|tel\b|phone\b|fax\b|e-?mail\b|hereinafter\b)/i
+  // Помеченное контактное поле (Phone #:, Tel:, Fax:, Email:) обрезаем даже БЕЗ
+  // запятой перед ним: Stage 9 может склеить адрес и контакты в один абзац
+  // ("... Example City Phone #: <номер>"), и без этой обрезки адрес проглатывал
+  // бы телефон (структурный ADDRESS перебивает структурный PHONE).
+  const contactFieldRe = /\s(?:telephone|tel|phone|fax|e-?mail|mobile|cell)\b[\s.]*[:#]/i
 
   let m: RegExpExecArray | null
   while ((m = labelRe.exec(text))) {
@@ -184,8 +189,12 @@ function detectAddress(text: string): RawMatch[] {
     if (lineEnd === -1) lineEnd = text.length
     let raw = text.slice(valueStart, lineEnd)
 
+    const cuts: number[] = []
     const fm = fieldRe.exec(raw)
-    if (fm) raw = raw.slice(0, fm.index)
+    if (fm) cuts.push(fm.index)
+    const cm = contactFieldRe.exec(raw)
+    if (cm) cuts.push(cm.index)
+    if (cuts.length) raw = raw.slice(0, Math.min(...cuts))
 
     const value = raw.trim()
     const leadWs = raw.length - raw.trimStart().length
