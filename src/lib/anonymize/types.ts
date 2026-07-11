@@ -1,10 +1,10 @@
 export type EntityType =
   | 'PERSON' | 'COMPANY' | 'ADDRESS' | 'REG_NUMBER'
-  | 'IBAN' | 'SWIFT' | 'ACCOUNT' | 'CARD' | 'EMAIL' | 'PHONE'
+  | 'IBAN' | 'SWIFT' | 'ACCOUNT' | 'CARD' | 'EMAIL' | 'PHONE' | 'OTHER'
 
 export const ALL_ENTITY_TYPES: EntityType[] = [
   'PERSON', 'COMPANY', 'ADDRESS', 'REG_NUMBER',
-  'IBAN', 'SWIFT', 'ACCOUNT', 'CARD', 'EMAIL', 'PHONE',
+  'IBAN', 'SWIFT', 'ACCOUNT', 'CARD', 'EMAIL', 'PHONE', 'OTHER',
 ]
 
 export interface RawMatch {

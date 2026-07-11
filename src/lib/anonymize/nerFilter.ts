@@ -48,6 +48,23 @@ const GENERIC_MODIFIERS = new Set([
 
 const CONNECTORS = new Set(['and', 'or', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with'])
 
+// Британский почтовый индекс (формат вида SW1A 1AA, EC1A 1BB). GLiNER иногда тегает
+// индекс-хвост адреса как REG_NUMBER — это ложняк, отбрасываем.
+const UK_POSTCODE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/
+
+// Суффиксы юрлиц: PERSON-спан, содержащий такой токен, — это компания, ошибочно
+// помеченная человеком (обычно OCR-склейка двух названий: "ACME LIMITED GLOBEX LLC").
+// Компании ловятся отдельно, поэтому такой PERSON отбрасываем.
+const COMPANY_SUFFIXES = new Set([
+  'ltd', 'limited', 'llc', 'llp', 'ltda', 'inc', 'incorporated', 'plc',
+  'gmbh', 'kft', 'corp', 'corporation',
+])
+
+// Ведущий титул/должность перед именем ("Director John Smith"). Требует
+// разделитель после титула, поэтому срабатывает только когда дальше есть имя.
+const LEADING_TITLE =
+  /^(?:(?:director|manager|mr|mrs|ms|dr|prof|ceo|cfo|cto|coo|chairman|chairperson|chairwoman|president|secretary|treasurer)\.?[\s,]+)+/i
+
 const GENERIC_WORDS = new Set<string>([
   ...DETERMINERS,
   ...ROLE_NOUNS,
@@ -86,37 +103,63 @@ function stripLeadingDeterminers(words: string[]): string[] {
 }
 
 export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
-  return matches.filter((m) => {
+  const out: RawMatch[] = []
+  for (const m0 of matches) {
+    let m = m0
     if (
       m.type !== 'PERSON' &&
       m.type !== 'COMPANY' &&
       m.type !== 'ADDRESS' &&
       m.type !== 'REG_NUMBER'
     ) {
-      return true
+      out.push(m)
+      continue
+    }
+
+    // Индекс, ошибочно помеченный REG_NUMBER (формат "SW1A 1AA"). Проверяем ДО
+    // раннего пропуска «в спане есть цифра» — в индексе цифры есть.
+    if (m.type === 'REG_NUMBER' && UK_POSTCODE.test(m.value.trim())) continue
+
+    // Обрезаем ведущий титул/должность у PERSON ("Director John Smith" →
+    // "John Smith"): смещаем start на длину совпадения, чтобы позиции остались
+    // валидными и спан слился с уже найденным именем.
+    if (m.type === 'PERSON') {
+      const t = LEADING_TITLE.exec(m.value)
+      if (t && t[0].length < m.value.length) {
+        const cut = t[0].length
+        m = { ...m, value: m.value.slice(cut), start: m.start + cut }
+      }
     }
 
     const words = stripLeadingDeterminers(splitWords(m.value))
-    if (words.length === 0) return false
+    if (words.length === 0) continue
 
-    if (/\d/.test(m.value)) return true
+    if (/\d/.test(m.value)) {
+      out.push(m)
+      continue
+    }
 
     if (m.type === 'PERSON' || m.type === 'COMPANY') {
+      // PERSON со суффиксом юрлица — это компания, ошибочно помеченная человеком.
+      if (m.type === 'PERSON' && words.some((w) => COMPANY_SUFFIXES.has(w))) continue
       const allGeneric = words.every((w) => GENERIC_WORDS.has(w))
       const hasRoleNoun = words.some((w) => ROLE_NOUNS.has(w))
-      if (allGeneric && hasRoleNoun) return false
-      return true
+      if (allGeneric && hasRoleNoun) continue
+      out.push(m)
+      continue
     }
 
     if (m.type === 'REG_NUMBER') {
       const allGenericRegnum = words.every((w) => GENERIC_REGNUM_WORDS.has(w))
-      if (allGenericRegnum) return false
-      return true
+      if (allGenericRegnum) continue
+      out.push(m)
+      continue
     }
 
     // ADDRESS
     const allGenericAddress = words.every((w) => GENERIC_ADDRESS_WORDS.has(w))
-    if (allGenericAddress) return false
-    return true
-  })
+    if (allGenericAddress) continue
+    out.push(m)
+  }
+  return out
 }

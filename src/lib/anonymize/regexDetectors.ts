@@ -159,6 +159,47 @@ function detectAccount(text: string): RawMatch[] {
   return matches
 }
 
+// Адрес по метке: значение после "business address:" / "registered office address:" /
+// "Address:" и т.п. Двоеточие ОБЯЗАТЕЛЬНО — это отсекает прозу вида "registered office
+// address of the other Party". Значение берём до конца строки, затем обрезаем по
+// ключевому слову следующего поля. GLiNER не тегирует адреса, начинающиеся со страны
+// (Georgia, ... / Hungary, ...) — этот детектор ловит их детерминированно. Структурные
+// матчи перебивают NER в resolveOverlaps, поэтому регексовый адрес поглощает NER-фрагменты.
+function detectAddress(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+  const labelRe =
+    /\b(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+|registered\s+)?address\s*:/gi
+  // Ключевые слова следующего поля в той же строке — по ним обрезаем хвост значения.
+  const fieldRe =
+    /,\s*(?:company\s+(?:registration|reg)\b|registration\s+(?:no|number)\b|reg\.?\s*(?:no|number)\b|CRN\b|VAT\b|represented\s+by\b|acting\b|director\b|tel\b|phone\b|fax\b|e-?mail\b|hereinafter\b)/i
+
+  let m: RegExpExecArray | null
+  while ((m = labelRe.exec(text))) {
+    // Не-адресные метки: "email address:", "e-mail address:", "IP address:", "web address:".
+    const before = text.slice(Math.max(0, m.index - 8), m.index)
+    if (/(?:e-?mail|ip|web|url)\s$/i.test(before)) continue
+
+    const valueStart = m.index + m[0].length
+    let lineEnd = text.indexOf('\n', valueStart)
+    if (lineEnd === -1) lineEnd = text.length
+    let raw = text.slice(valueStart, lineEnd)
+
+    const fm = fieldRe.exec(raw)
+    if (fm) raw = raw.slice(0, fm.index)
+
+    const value = raw.trim()
+    const leadWs = raw.length - raw.trimStart().length
+    // Похоже на адрес: минимальная длина, есть цифра или запятая, не e-mail.
+    if (value.length < 5) continue
+    if (value.includes('@')) continue
+    if (!/[\d,]/.test(value)) continue
+
+    const start = valueStart + leadWs
+    matches.push({ type: 'ADDRESS', value, start, end: start + value.length })
+  }
+  return matches
+}
+
 function detectRegNumber(text: string): RawMatch[] {
   const matches: RawMatch[] = []
   const contextPatterns = [
@@ -200,5 +241,6 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectPhone(text),
     ...detectAccount(text),
     ...detectRegNumber(text),
+    ...detectAddress(text),
   ]
 }

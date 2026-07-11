@@ -34,3 +34,12 @@ spec.md
 
 # Detection baseline — contains PII from sample contracts, local-only
 BASELINE.md
+
+# Golden-harness output (detected entity values = PII from sample contracts), local-only
+out*.json
+score*.txt
+progress*.log
+
+# Unit tests — local-only (fixtures carry sample-contract PII; not shipped to the repo)
+*.test.ts
+*.test.tsx

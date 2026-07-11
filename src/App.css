@@ -364,6 +364,7 @@
   --ent-CARD: rgba(227, 73, 72, 0.30);
   --ent-EMAIL: rgba(14, 155, 184, 0.30);
   --ent-PHONE: rgba(138, 109, 59, 0.34);
+  --ent-OTHER: rgba(110, 118, 135, 0.30);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -378,6 +379,7 @@
     --ent-CARD: rgba(230, 103, 103, 0.45);
     --ent-EMAIL: rgba(57, 167, 194, 0.45);
     --ent-PHONE: rgba(176, 141, 79, 0.48);
+    --ent-OTHER: rgba(148, 156, 173, 0.45);
   }
 }
 
@@ -391,6 +393,7 @@
 .cm-entity-CARD { background-color: var(--ent-CARD); }
 .cm-entity-EMAIL { background-color: var(--ent-EMAIL); }
 .cm-entity-PHONE { background-color: var(--ent-PHONE); }
+.cm-entity-OTHER { background-color: var(--ent-OTHER); }
 
 .cm-entity-inactive {
   background: none !important;
