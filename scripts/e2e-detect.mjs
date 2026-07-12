@@ -74,11 +74,49 @@ for (const file of files) {
     })),
   )
 
+  // Read back the app's persisted sourceText from IndexedDB (best-effort).
+  // Give the app's initial putDoc a moment to commit before we look.
+  await page.waitForTimeout(500)
+  const sourceText = await page
+    .evaluate(
+      () =>
+        new Promise((resolve) => {
+          try {
+            const req = indexedDB.open('md-blinder')
+            req.onerror = () => resolve(null)
+            req.onsuccess = () => {
+              const db = req.result
+              try {
+                const tx = db.transaction('documents', 'readonly')
+                const store = tx.objectStore('documents')
+                const getAllReq = store.getAll()
+                getAllReq.onerror = () => resolve(null)
+                getAllReq.onsuccess = () => {
+                  const records = getAllReq.result || []
+                  if (!records.length) return resolve('')
+                  let best = records[0]
+                  for (const r of records) {
+                    if ((r.updatedAt || 0) > (best.updatedAt || 0)) best = r
+                  }
+                  resolve(best.sourceText ?? '')
+                }
+              } catch {
+                resolve(null)
+              }
+            }
+          } catch {
+            resolve(null)
+          }
+        }),
+    )
+    .catch(() => null)
+
   results[basename(file)] = {
     finished,
     error: errText,
     nerNotice,
     entities,
+    sourceText,
     pageErrors: errors.slice(0, 10),
   }
 

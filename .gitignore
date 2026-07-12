@@ -32,6 +32,9 @@ test-samples/
 # Spec kept local-only
 spec.md
 
+# Work-plan / TZ kept local-only (single merged plan + any future variants)
+md-blinder-tz*.md
+
 # Detection baseline — contains PII from sample contracts, local-only
 BASELINE.md
 
