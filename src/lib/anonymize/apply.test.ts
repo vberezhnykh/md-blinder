@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { addEntityFromSelection, buildAnonymizedText, entityCurrentValue, nextPlaceholderNumber } from './apply'
+import {
+  addEntityFromSelection,
+  buildAnonymizedText,
+  changeEntityType,
+  dedupeEntityIds,
+  entityCurrentValue,
+  nextPlaceholderNumber,
+} from './apply'
 import type { Entity } from './types'
 
 function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'placeholder' | 'positions'>): Entity {
@@ -252,5 +259,126 @@ describe('addEntityFromSelection', () => {
     expect(newEntity?.placeholder).toMatch(/^\[ADDRESS_\d+\]$/)
     const placeholders = result.map((e) => e.placeholder)
     expect(new Set(placeholders).size).toBe(placeholders.length)
+  })
+
+  it('yields a UUID-style id distinct from the placeholder', () => {
+    const sourceText = 'Acme Ltd works with Beta Ltd'
+    const result = addEntityFromSelection([], sourceText, 0, 8, 'COMPANY')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].placeholder).toBe('[COMPANY_1]')
+    expect(result[0].id).not.toBe(result[0].placeholder)
+    expect(result[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  })
+})
+
+describe('changeEntityType', () => {
+  it('updates the target entity type and placeholder, keeps its id, and leaves others untouched', () => {
+    const sourceText = 'Acme Ltd and John Smith'
+    const withCompany = addEntityFromSelection([], sourceText, 0, 8, 'COMPANY')
+    const withPerson = addEntityFromSelection(withCompany, sourceText, 13, 23, 'PERSON')
+
+    const company = withPerson.find((e) => e.type === 'COMPANY')!
+    const person = withPerson.find((e) => e.type === 'PERSON')!
+
+    const result = changeEntityType(withPerson, company.id, 'PERSON')
+
+    const changed = result.find((e) => e.id === company.id)!
+    expect(changed.type).toBe('PERSON')
+    expect(changed.placeholder).toBe('[PERSON_2]')
+    expect(changed.id).toBe(company.id)
+
+    const untouched = result.find((e) => e.id === person.id)!
+    expect(untouched).toEqual(person)
+  })
+
+  it('returns the array unchanged when the id does not exist', () => {
+    const sourceText = 'Acme Ltd'
+    const entities = addEntityFromSelection([], sourceText, 0, 8, 'COMPANY')
+
+    const result = changeEntityType(entities, 'no-such-id', 'PERSON')
+
+    expect(result).toBe(entities)
+  })
+
+  it('AUD-1.2: recoloring then adding a new entity of the vacated type produces unique ids', () => {
+    const sourceText = 'Acme Ltd works with Globex Inc'
+    let entities = addEntityFromSelection([], sourceText, 0, 8, 'COMPANY')
+    const firstId = entities[0].id
+
+    entities = changeEntityType(entities, firstId, 'PERSON')
+
+    const globexStart = sourceText.indexOf('Globex Inc')
+    entities = addEntityFromSelection(
+      entities,
+      sourceText,
+      globexStart,
+      globexStart + 'Globex Inc'.length,
+      'COMPANY',
+    )
+
+    expect(entities).toHaveLength(2)
+    const ids = entities.map((e) => e.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('dedupeEntityIds', () => {
+  it('assigns a fresh id to a later duplicate while keeping the first occurrence', () => {
+    const shared: Entity = {
+      id: 'dup-id',
+      type: 'PERSON',
+      value: 'John',
+      placeholder: '[PERSON_1]',
+      occurrences: 1,
+      positions: [{ start: 0, end: 4 }],
+      anonymize: true,
+      manual: false,
+    }
+    const collidingCompany: Entity = {
+      id: 'dup-id',
+      type: 'COMPANY',
+      value: 'Acme',
+      placeholder: '[COMPANY_1]',
+      occurrences: 1,
+      positions: [{ start: 10, end: 14 }],
+      anonymize: true,
+      manual: false,
+    }
+    const entities = [shared, collidingCompany]
+
+    const result = dedupeEntityIds(entities)
+
+    expect(result).toHaveLength(2)
+    expect(result[0].id).toBe('dup-id')
+    const ids = result.map((e) => e.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(result[1].id).not.toBe('dup-id')
+  })
+
+  it('leaves an already-unique array with unchanged ids', () => {
+    const a: Entity = {
+      id: 'id-a',
+      type: 'PERSON',
+      value: 'John',
+      placeholder: '[PERSON_1]',
+      occurrences: 1,
+      positions: [{ start: 0, end: 4 }],
+      anonymize: true,
+      manual: false,
+    }
+    const b: Entity = {
+      id: 'id-b',
+      type: 'COMPANY',
+      value: 'Acme',
+      placeholder: '[COMPANY_1]',
+      occurrences: 1,
+      positions: [{ start: 10, end: 14 }],
+      anonymize: true,
+      manual: false,
+    }
+    const result = dedupeEntityIds([a, b])
+
+    expect(result.map((e) => e.id)).toEqual(['id-a', 'id-b'])
   })
 })

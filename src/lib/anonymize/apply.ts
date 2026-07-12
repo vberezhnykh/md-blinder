@@ -74,7 +74,7 @@ export function addEntityFromSelection(
 
   const placeholder = `[${type}_${nextPlaceholderNumber(working, type)}]`
   const newEntity: Entity = {
-    id: placeholder,
+    id: crypto.randomUUID(),
     type,
     value: selected,
     placeholder,
@@ -84,4 +84,26 @@ export function addEntityFromSelection(
     manual: true,
   }
   return [...working, newEntity]
+}
+
+// Recolor an entity to a new type, recomputing its placeholder against the
+// OTHER entities (so it never collides with an existing placeholder of the
+// new type). The entity's `id` is stable and never changes here.
+export function changeEntityType(entities: Entity[], id: string, newType: EntityType): Entity[] {
+  if (!entities.some((e) => e.id === id)) return entities
+  const others = entities.filter((e) => e.id !== id)
+  const placeholder = `[${newType}_${nextPlaceholderNumber(others, newType)}]`
+  return entities.map((e) => (e.id === id ? { ...e, type: newType, placeholder } : e))
+}
+
+// Guard against stale persisted history docs that may contain duplicate ids
+// (pre-fix bug: id was derived from placeholder). Keeps the first occurrence
+// of each id and assigns a fresh UUID to any later duplicate.
+export function dedupeEntityIds(entities: Entity[]): Entity[] {
+  const seen = new Set<string>()
+  return entities.map((e) => {
+    if (seen.has(e.id)) return { ...e, id: crypto.randomUUID() }
+    seen.add(e.id)
+    return e
+  })
 }

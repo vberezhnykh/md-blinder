@@ -1,0 +1,97 @@
+const OVERLAP = 200
+
+// Splits text into ≤maxLen chunks on paragraph boundaries, hard-splitting any
+// paragraph that alone exceeds maxLen. Each chunk carries `base`, its true
+// char offset in the original text, computed by re-slicing the source
+// string rather than reassembling from the split parts (so offsets never
+// drift because of varying separator lengths).
+export function chunkText(text: string, maxLen = 1500): { text: string; base: number }[] {
+  const paragraphs = text.split(/\n\n+/)
+  const chunks: { text: string; base: number }[] = []
+  let searchFrom = 0
+  let current = ''
+  let currentBase = 0
+
+  const flush = () => {
+    if (current.length) {
+      chunks.push({ text: current, base: currentBase })
+      current = ''
+    }
+  }
+
+  for (const para of paragraphs) {
+    const idx = text.indexOf(para, searchFrom)
+    const paraStart = idx === -1 ? searchFrom : idx
+    searchFrom = paraStart + para.length
+
+    if (!para.length) continue
+
+    if (para.length > maxLen) {
+      flush()
+      let offset = 0
+      while (offset < para.length) {
+        const windowEnd = Math.min(offset + maxLen, para.length)
+        const end = findSplitPoint(para, offset, windowEnd)
+        chunks.push({ text: para.slice(offset, end), base: paraStart + offset })
+        if (end >= para.length) break
+        const next = Math.max(end - OVERLAP, offset + 1)
+        offset = next
+      }
+      continue
+    }
+
+    if (!current.length) {
+      current = para
+      currentBase = paraStart
+    } else if (paraStart + para.length - currentBase <= maxLen) {
+      current = text.slice(currentBase, paraStart + para.length)
+    } else {
+      flush()
+      current = para
+      currentBase = paraStart
+    }
+  }
+  flush()
+  return chunks
+}
+
+// Finds the best place to end a hard-split chunk within [offset, windowEnd]:
+// the last sentence boundary ('. ' or newline), or failing that the last
+// space, as long as it lies past the halfway point of the window. Falls back
+// to windowEnd if no good boundary is found.
+function findSplitPoint(para: string, offset: number, windowEnd: number): number {
+  if (windowEnd >= para.length) return windowEnd
+
+  const halfway = offset + Math.floor((windowEnd - offset) / 2)
+  const window = para.slice(offset, windowEnd)
+
+  let bestSentence = -1
+  let searchIdx = 0
+  for (;;) {
+    const dot = window.indexOf('. ', searchIdx)
+    const nl = window.indexOf('\n', searchIdx)
+    let found = -1
+    let len = 0
+    if (dot !== -1) {
+      found = dot
+      len = 2
+    }
+    if (nl !== -1 && (found === -1 || nl < found)) {
+      found = nl
+      len = 1
+    }
+    if (found === -1) break
+    bestSentence = found + len
+    searchIdx = found + 1
+  }
+  if (bestSentence !== -1 && offset + bestSentence > halfway) {
+    return offset + bestSentence
+  }
+
+  const lastSpace = window.lastIndexOf(' ')
+  if (lastSpace !== -1 && offset + lastSpace + 1 > halfway) {
+    return offset + lastSpace + 1
+  }
+
+  return windowEnd
+}

@@ -12,6 +12,11 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
   const merged: RawMatch[] = []
   let run: { start: number; end: number } | null = null
 
+  // Стоп-слова, которые чаще всего разделяют ДВЕ РАЗНЫЕ сущности в перечислении
+  // ("1 Main St to 2 Oak Ave", "from ... between ... and ..."), а не куски одного
+  // адреса, разорванного NER. Склеенный по ним адрес объединил бы два разных места.
+  const STOP_WORDS_RE = /\b(?:to|and|or|from|between|versus|vs)\b/i
+
   const bridgeable = (prevEnd: number, nextStart: number): boolean => {
     if (nextStart <= prevEnd) return true // перекрытие / вплотную
     const gap = text.slice(prevEnd, nextStart)
@@ -22,6 +27,7 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
     // НЕ считаем — предложения с цифры не начинаются.
     const probe = gap + (text[nextStart] ?? '')
     if (/[.!?]["')\]]?\s+[^\d\s]/u.test(probe)) return false
+    if (STOP_WORDS_RE.test(gap)) return false // разделитель перечисления ("... to ...")
     if (gap.length <= 45) return true // адреса длинные; зазор увеличен с 30
     return false
   }

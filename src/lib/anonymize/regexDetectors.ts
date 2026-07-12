@@ -130,20 +130,71 @@ function isCepLike(s: string): boolean {
   return /^\d{2}\.\d{3}-\d{3}$/.test(s.trim())
 }
 
+const PHONE_LABEL_SRC = 'tel|telephone|phone|mobile|cell|fax'
+
+// Метка телефона непосредственно перед кандидатом (в пределах ~10 символов слева) —
+// защищает 3-значную группировку ("Tel: 123 456 789") и разрешает контактную метку
+// перед контактным номером без разделителей ("Tel: 0612345678").
+function hasPhoneLabelBefore(text: string, index: number): boolean {
+  const before = text.slice(Math.max(0, index - 25), index)
+  return new RegExp(`\\b(?:${PHONE_LABEL_SRC})\\b[\\s.:#]*$`, 'i').test(before)
+}
+
+// Денежная сумма без метки телефона: заканчивается на копейки/центы, ИЛИ похожа на
+// группировку по тысячам (все группы после первой — ровно 3 цифры), ИЛИ ей
+// предшествует денежный маркер ($ € £ / USD EUR GBP UAH RUB HUF).
+function looksLikeMoneySum(raw: string, text: string, index: number): boolean {
+  if (raw.includes('+') || /[()]/.test(raw)) return false
+  if (hasPhoneLabelBefore(text, index)) return false
+
+  if (/\.\d{2}$/.test(raw)) return true
+
+  const groups = raw.split(/[\s.-]+/).filter(Boolean)
+  if (groups.length >= 3 && groups.slice(1).every((g) => g.length === 3)) return true
+
+  const before = text.slice(Math.max(0, index - 6), index)
+  if (/(?:[$€£]|USD|EUR|GBP|UAH|RUB|HUF)\s?$/i.test(before)) return true
+
+  return false
+}
+
 function detectPhone(text: string): RawMatch[] {
-  const re = /(?:\+\d{1,3}[\s.-]?)?(?:\(\d{1,4}\)[\s.-]?)?\d{2,5}(?:[\s.-]\d{2,5}){1,4}/g
   const matches: RawMatch[] = []
+
+  // Проход 1: номера с разделителями (пробел/точка/дефис/скобки), опциональный код страны.
+  // Первая группа цифр обычно 2-5 цифр, НО если перед ней есть код страны (+36 …),
+  // разрешаем 1-значный локальный/зоновый код (Будапешт "1" в "+36 1 234 5678") —
+  // без кода страны 1-значная группа по-прежнему не считается началом номера.
+  const sepRe =
+    /(?:\+\d{1,3}[\s.-]?(?:\(\d{1,4}\)[\s.-]?)?\d{1,5}|(?:\(\d{1,4}\)[\s.-]?)?\d{2,5})(?:[\s.-]\d{2,5}){1,4}/g
+  const sepMatches: RawMatch[] = []
   let m: RegExpExecArray | null
-  while ((m = re.exec(text))) {
+  while ((m = sepRe.exec(text))) {
     const raw = m[0]
     if (isDateLike(raw)) continue
     if (isCepLike(raw)) continue
     const digits = raw.replace(/\D/g, '')
     if (digits.length < 7 || digits.length > 15) continue
-    const isAllDigitsNoSep = /^\d+$/.test(raw)
-    if (isAllDigitsNoSep && raw.length >= 12) continue
-    matches.push({ type: 'PHONE', value: raw, start: m.index, end: m.index + raw.length })
+    if (looksLikeMoneySum(raw, text, m.index)) continue
+    sepMatches.push({ type: 'PHONE', value: raw, start: m.index, end: m.index + raw.length })
   }
+  matches.push(...sepMatches)
+
+  // Проход 2: метка телефона + контактные цифры без разделителей ("Tel: 0612345678",
+  // "Phone #: 12025550123"). Без метки голое число НЕ считается телефоном.
+  const labelRe = new RegExp(`\\b(?:${PHONE_LABEL_SRC})\\b[\\s.:#]*(\\+?\\d{7,15})`, 'gi')
+  let lm: RegExpExecArray | null
+  while ((lm = labelRe.exec(text))) {
+    const captured = lm[1]
+    const groupStart = lm.index + lm[0].length - captured.length
+    const groupEnd = groupStart + captured.length
+    const digits = captured.replace(/\D/g, '')
+    if (digits.length < 7 || digits.length > 15) continue
+    // Пропускаем, если пересекается с уже найденным матчем из прохода 1 (он приоритетнее).
+    if (sepMatches.some((s) => groupStart < s.end && s.start < groupEnd)) continue
+    matches.push({ type: 'PHONE', value: captured, start: groupStart, end: groupEnd })
+  }
+
   return matches
 }
 

@@ -151,6 +151,66 @@ describe('stitchAddressRuns', () => {
     expect(addressMatches[0].end).toBe(start2 + frag2.length)
   })
 
+  // AUD-2.4: a stop-word gap ("... to ...") separates two DIFFERENT addresses,
+  // it must not be bridged even though the gap itself is short.
+  it('does not merge two different addresses separated by " to "', () => {
+    const text = 'Deliver from 1 Main St, Springfield to 2 Oak Ave, Shelbyville please'
+    const frag1 = '1 Main St, Springfield'
+    const frag2 = '2 Oak Ave, Shelbyville'
+    const start1 = text.indexOf(frag1)
+    const start2 = text.indexOf(frag2)
+
+    const matches: RawMatch[] = [
+      { type: 'ADDRESS', value: frag1, start: start1, end: start1 + frag1.length },
+      { type: 'ADDRESS', value: frag2, start: start2, end: start2 + frag2.length },
+    ]
+
+    const result = stitchAddressRuns(matches, text)
+
+    expect(result).toHaveLength(2)
+    const values = result.map((m) => m.value).sort()
+    expect(values).toEqual([frag1, frag2].sort())
+  })
+
+  it('does not merge two different addresses separated by " and "', () => {
+    const text = 'Sites at 1 Main St, Springfield and 2 Oak Ave, Shelbyville are affected'
+    const frag1 = '1 Main St, Springfield'
+    const frag2 = '2 Oak Ave, Shelbyville'
+    const start1 = text.indexOf(frag1)
+    const start2 = text.indexOf(frag2)
+
+    const matches: RawMatch[] = [
+      { type: 'ADDRESS', value: frag1, start: start1, end: start1 + frag1.length },
+      { type: 'ADDRESS', value: frag2, start: start2, end: start2 + frag2.length },
+    ]
+
+    const result = stitchAddressRuns(matches, text)
+
+    expect(result).toHaveLength(2)
+    const values = result.map((m) => m.value).sort()
+    expect(values).toEqual([frag1, frag2].sort())
+  })
+
+  it('still merges ADDRESS fragments separated by a glue gap like " / "', () => {
+    const text = 'Located at BLOCK A / SECOND FLOOR for delivery'
+    const frag1 = 'BLOCK A'
+    const frag2 = 'SECOND FLOOR'
+    const start1 = text.indexOf(frag1)
+    const start2 = text.indexOf(frag2)
+
+    const matches: RawMatch[] = [
+      { type: 'ADDRESS', value: frag1, start: start1, end: start1 + frag1.length },
+      { type: 'ADDRESS', value: frag2, start: start2, end: start2 + frag2.length },
+    ]
+
+    const result = stitchAddressRuns(matches, text)
+
+    expect(result).toHaveLength(1)
+    expect(result[0].start).toBe(start1)
+    expect(result[0].end).toBe(start2 + frag2.length)
+    expect(result[0].value).toBe(text.slice(result[0].start, result[0].end))
+  })
+
   it('does not merge ADDRESS fragments separated by a gap longer than 30 characters', () => {
     const text = 'MAIN ST here is some unrelated filler text padding out the gap SECOND AVE'
     const frag1 = 'MAIN ST'

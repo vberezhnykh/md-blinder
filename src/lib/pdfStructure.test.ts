@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { itemsToMarkdown, type PdfTextItem } from './pdfStructure'
+import { itemsToMarkdown, stripRepeatedLinesAndPageNumbers, type PdfTextItem } from './pdfStructure'
 
 // Синтетические данные: никаких реальных имён/адресов, только заглушки
 // вида "Section One", "Company Alpha", "12 Example Street".
@@ -274,5 +274,47 @@ describe('itemsToMarkdown: edge cases', () => {
   it('returns an empty string when there are no items', () => {
     expect(itemsToMarkdown([])).toBe('')
     expect(itemsToMarkdown([[]])).toBe('')
+  })
+})
+
+describe('stripRepeatedLinesAndPageNumbers', () => {
+  it('drops a header line repeated on all pages, drops bare page-number lines, keeps unique body lines', () => {
+    const pages = [
+      ['Sample Contract Header', 'Body paragraph number 1 for the synthetic sample text.', '12'],
+      ['Sample Contract Header', 'Body paragraph number 2 for the synthetic sample text.', 'Page 3'],
+      ['Sample Contract Header', 'Body paragraph number 3 for the synthetic sample text.', '14'],
+    ]
+
+    const result = stripRepeatedLinesAndPageNumbers(pages)
+
+    expect(result).toEqual([
+      ['Body paragraph number 1 for the synthetic sample text.'],
+      ['Body paragraph number 2 for the synthetic sample text.'],
+      ['Body paragraph number 3 for the synthetic sample text.'],
+    ])
+  })
+
+  it('with fewer than 3 pages still drops bare page-number lines but does not suppress repeats', () => {
+    const pages = [
+      ['Sample Contract Header', 'Body paragraph one for the synthetic sample text.', '1'],
+      ['Sample Contract Header', 'Body paragraph two for the synthetic sample text.', 'Page 2'],
+    ]
+
+    const result = stripRepeatedLinesAndPageNumbers(pages)
+
+    // Repeated header stays (only >=3 pages triggers repeat-suppression)...
+    expect(result[0]).toEqual(['Sample Contract Header', 'Body paragraph one for the synthetic sample text.'])
+    expect(result[1]).toEqual(['Sample Contract Header', 'Body paragraph two for the synthetic sample text.'])
+    // ...but the bare page-number lines are still gone.
+    expect(result.flat().some((line) => /^\d+$/.test(line) || /^page\s+\d+/i.test(line))).toBe(false)
+  })
+
+  it('does not mutate the input arrays', () => {
+    const pages = [['Header', 'Body one.'], ['Header', 'Body two.'], ['Header', 'Body three.']]
+    const snapshot = pages.map((p) => [...p])
+
+    stripRepeatedLinesAndPageNumbers(pages)
+
+    expect(pages).toEqual(snapshot)
   })
 })

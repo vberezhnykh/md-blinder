@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { detectFileKind } from './lib/fileType'
 import { docxToMarkdown } from './lib/docxToMarkdown'
 import { pdfToMarkdown } from './lib/pdfToMarkdown'
-import { ocrPdfToMarkdown } from './lib/ocrPdf'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, buildAnonymizedText, nextPlaceholderNumber } from './lib/anonymize/apply'
+import { addEntityFromSelection, buildAnonymizedText, changeEntityType, dedupeEntityIds } from './lib/anonymize/apply'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDoc } from './lib/history'
 import ReplacementTable from './components/ReplacementTable'
@@ -105,6 +104,7 @@ function App() {
     const id = currentDocId
     const meta = currentMetaRef.current
     if (!id || !meta) return
+    if (sourceText === '') return
     const t = setTimeout(() => {
       putDoc({ id, name: meta.name, format: meta.format, createdAt: meta.createdAt, updatedAt: Date.now(), sourceText, entities })
         .then(refreshHistory)
@@ -115,7 +115,7 @@ function App() {
 
   const handleOpenDoc = useCallback((doc: HistoryDoc) => {
     setSourceText(doc.sourceText)
-    setEntities(doc.entities)
+    setEntities(dedupeEntityIds(doc.entities))
     setFileName(doc.name)
     setNerNotice(false)
     setCurrentDocId(doc.id)
@@ -172,6 +172,8 @@ function App() {
     setNerNotice(false)
     setView('editor')
     setHasResult(false)
+    setCurrentDocId(null)
+    currentMetaRef.current = null
 
     try {
       const kind = await detectFileKind(file)
@@ -198,17 +200,11 @@ function App() {
         return
       }
 
-      const { markdown: md, scanned } = await pdfToMarkdown(
+      const { markdown: md } = await pdfToMarkdown(
         await file.arrayBuffer(),
         (page, total) => setProgress({ phase: 'pdf', page, total }),
+        (p) => setProgress({ phase: 'ocr', page: p.page, total: p.total, pct: p.pct }),
       )
-      if (scanned) {
-        const ocrMd = await ocrPdfToMarkdown(await file.arrayBuffer(), (p) =>
-          setProgress({ phase: 'ocr', page: p.page, total: p.total, pct: p.pct }),
-        )
-        await runAnonymization(ocrMd, file.name)
-        return
-      }
       await runAnonymization(md, file.name)
     } catch (e) {
       setStatus('error')
@@ -262,11 +258,7 @@ function App() {
   }, [])
 
   const handleChangeType = useCallback((id: string, newType: EntityType) => {
-    setEntities((prev) => {
-      const others = prev.filter((e) => e.id !== id)
-      const placeholder = `[${newType}_${nextPlaceholderNumber(others, newType)}]`
-      return prev.map((e) => (e.id === id ? { ...e, type: newType, placeholder } : e))
-    })
+    setEntities((prev) => changeEntityType(prev, id, newType))
   }, [])
 
   const handleDelete = useCallback((id: string) => {

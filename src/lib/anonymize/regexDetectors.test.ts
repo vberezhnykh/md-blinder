@@ -200,4 +200,78 @@ describe('detectStructural', () => {
     const matches = detectStructural('Email address: john@acme.co')
     expect(matches.some((m) => m.type === 'ADDRESS')).toBe(false)
   })
+
+  // AUD-2.1: label-anchored contiguous-digit phones.
+  it('detects a labeled contiguous-digit phone number ("Tel: ...")', () => {
+    const matches = detectStructural('Tel: 0612345678 for support')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '0612345678')).toBe(true)
+  })
+
+  it('detects a labeled contiguous-digit phone number ("Phone #: ...")', () => {
+    const matches = detectStructural('Phone #: 12025550123 for support')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '12025550123')).toBe(true)
+  })
+
+  it('does not treat a bare unlabeled contiguous number as a phone number', () => {
+    const matches = detectStructural('Invoice No. 12025550123 is due')
+    expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+  })
+
+  it('still detects a Hungarian-style separated phone number', () => {
+    const matches = detectStructural('Call +36 1 234 5678 now')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '+36 1 234 5678')).toBe(true)
+  })
+
+  it('still detects a US-style parenthesized phone number', () => {
+    const matches = detectStructural('Call (202) 555-0123 now')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '(202) 555-0123')).toBe(true)
+  })
+
+  it('still detects a UK-style separated phone number', () => {
+    const matches = detectStructural('Call 20 7946 0958 now')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '20 7946 0958')).toBe(true)
+  })
+
+  it('still detects a plus-prefixed separated phone number', () => {
+    const matches = detectStructural('Call +1 202 555 0123 now')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '+1 202 555 0123')).toBe(true)
+  })
+
+  it('keeps a labeled 3-3-3 grouped number as a phone despite thousands-like grouping', () => {
+    const matches = detectStructural('Tel: 123 456 789 for support')
+    const phones = matches.filter((m) => m.type === 'PHONE')
+    expect(phones.some((m) => m.value === '123 456 789')).toBe(true)
+  })
+
+  // AUD-2.2: drop money-sum false positives from the separator pass.
+  it('does not treat an unlabeled thousands-grouped number as a phone number', () => {
+    const matches = detectStructural('Total items: 1 000 000 units')
+    expect(matches.some((m) => m.type === 'PHONE' && m.value === '1 000 000')).toBe(false)
+  })
+
+  it('does not treat another unlabeled thousands-grouped number as a phone number', () => {
+    const matches = detectStructural('Population: 12 345 678 people')
+    expect(matches.some((m) => m.type === 'PHONE' && m.value === '12 345 678')).toBe(false)
+  })
+
+  it('does not treat a money amount with decimals as a phone number', () => {
+    const matches = detectStructural('Total: 123 456 789.00 due')
+    expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+  })
+
+  it('does not treat a euro-marked amount as a phone number', () => {
+    const matches = detectStructural('Price: € 1 234 567 total')
+    expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+  })
+
+  it('does not treat a USD-marked amount as a phone number', () => {
+    const matches = detectStructural('Budget: USD 2 500 000 approved')
+    expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+  })
 })

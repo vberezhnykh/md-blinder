@@ -1,21 +1,23 @@
 import { Gliner } from 'gliner'
 import type { EntityType, RawMatch } from '../lib/anonymize/types'
+import { chunkText } from './chunkText'
 
 const MODEL_URL =
   'https://huggingface.co/onnx-community/gliner_small-v2.1/resolve/main/onnx/model_quantized.onnx'
 const CACHE_NAME = 'md-blinder-ner'
 
 interface InboundMessage {
+  requestId: string
   text: string
   labels: string[]
   threshold: number
 }
 
 type OutboundMessage =
-  | { type: 'progress'; stage: 'load'; pct: number }
-  | { type: 'progress'; stage: 'detect'; chunk: number; chunks: number }
-  | { type: 'done'; matches: RawMatch[] }
-  | { type: 'error'; error: string }
+  | { requestId: string; type: 'progress'; stage: 'load'; pct: number }
+  | { requestId: string; type: 'progress'; stage: 'detect'; chunk: number; chunks: number }
+  | { requestId: string; type: 'done'; matches: RawMatch[] }
+  | { requestId: string; type: 'error'; error: string }
 
 function post(m: OutboundMessage) {
   self.postMessage(m)
@@ -78,10 +80,10 @@ async function loadModelBytes(onPct: (pct: number) => void): Promise<Uint8Array>
 
 let glinerPromise: Promise<Gliner> | null = null
 
-function getGliner(): Promise<Gliner> {
+function getGliner(requestId: string): Promise<Gliner> {
   if (!glinerPromise) {
     glinerPromise = (async () => {
-      const modelBytes = await loadModelBytes((pct) => post({ type: 'progress', stage: 'load', pct }))
+      const modelBytes = await loadModelBytes((pct) => post({ requestId, type: 'progress', stage: 'load', pct }))
       const gliner = new Gliner({
         tokenizerPath: 'onnx-community/gliner_small-v2.1',
         onnxSettings: {
@@ -113,61 +115,10 @@ function mapLabel(label: string): EntityType | null {
   }
 }
 
-// Splits text into ≤maxLen chunks on paragraph boundaries, hard-splitting any
-// paragraph that alone exceeds maxLen. Each chunk carries `base`, its true
-// char offset in the original text, computed by re-slicing the source
-// string rather than reassembling from the split parts (so offsets never
-// drift because of varying separator lengths).
-function chunkText(text: string, maxLen = 1500): { text: string; base: number }[] {
-  const paragraphs = text.split(/\n\n+/)
-  const chunks: { text: string; base: number }[] = []
-  let searchFrom = 0
-  let current = ''
-  let currentBase = 0
-
-  const flush = () => {
-    if (current.length) {
-      chunks.push({ text: current, base: currentBase })
-      current = ''
-    }
-  }
-
-  for (const para of paragraphs) {
-    const idx = text.indexOf(para, searchFrom)
-    const paraStart = idx === -1 ? searchFrom : idx
-    searchFrom = paraStart + para.length
-
-    if (!para.length) continue
-
-    if (para.length > maxLen) {
-      flush()
-      let offset = 0
-      while (offset < para.length) {
-        chunks.push({ text: para.slice(offset, offset + maxLen), base: paraStart + offset })
-        offset += maxLen
-      }
-      continue
-    }
-
-    if (!current.length) {
-      current = para
-      currentBase = paraStart
-    } else if (paraStart + para.length - currentBase <= maxLen) {
-      current = text.slice(currentBase, paraStart + para.length)
-    } else {
-      flush()
-      current = para
-      currentBase = paraStart
-    }
-  }
-  flush()
-  return chunks
-}
-
 self.onmessage = async (e: MessageEvent<InboundMessage>) => {
+  const { requestId, text, labels, threshold } = e.data
   try {
-    const { text, labels, threshold } = e.data
-    const gliner = await getGliner()
+    const gliner = await getGliner(requestId)
     const chunks = chunkText(text)
     const matches: RawMatch[] = []
 
@@ -185,11 +136,11 @@ self.onmessage = async (e: MessageEvent<InboundMessage>) => {
           end: chunk.base + item.end,
         })
       }
-      post({ type: 'progress', stage: 'detect', chunk: i + 1, chunks: chunks.length })
+      post({ requestId, type: 'progress', stage: 'detect', chunk: i + 1, chunks: chunks.length })
     }
 
-    post({ type: 'done', matches })
+    post({ requestId, type: 'done', matches })
   } catch (err) {
-    post({ type: 'error', error: err instanceof Error ? err.message : String(err) })
+    post({ requestId, type: 'error', error: err instanceof Error ? err.message : String(err) })
   }
 }

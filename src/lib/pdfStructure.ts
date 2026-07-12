@@ -123,18 +123,18 @@ function normalizeForRepeat(text: string): string {
     .trim()
 }
 
-// 3. Подавление повторяющихся колонтитулов и номеров страниц.
-function stripHeadersFooters(pagesLines: Line[][]): void {
-  if (pagesLines.length < 3) return
-
+// Общее ядро подавления повторяющихся первой/последней строки страницы.
+// Параметризовано доступом к тексту, чтобы работать как с внутренним типом
+// Line (текстовые PDF), так и с обычными строками (OCR-конвейер).
+function suppressRepeatedFirstLast<T>(pagesLines: T[][], getText: (item: T) => string): void {
   const threshold = Math.ceil(pagesLines.length * 0.5)
 
-  const countOccurrences = (pick: (lines: Line[]) => Line | undefined): Map<string, number> => {
+  const countOccurrences = (pick: (lines: T[]) => T | undefined): Map<string, number> => {
     const counts = new Map<string, number>()
     for (const lines of pagesLines) {
       const line = pick(lines)
       if (!line) continue
-      const norm = normalizeForRepeat(line.text)
+      const norm = normalizeForRepeat(getText(line))
       if (!norm) continue
       counts.set(norm, (counts.get(norm) ?? 0) + 1)
     }
@@ -148,27 +148,47 @@ function stripHeadersFooters(pagesLines: Line[][]): void {
     if (lines.length === 0) continue
 
     const first = lines[0]
-    const firstNorm = normalizeForRepeat(first.text)
+    const firstNorm = normalizeForRepeat(getText(first))
     const dropFirst = firstNorm && (firstCounts.get(firstNorm) ?? 0) >= threshold
 
     const last = lines[lines.length - 1]
-    const lastNorm = normalizeForRepeat(last.text)
+    const lastNorm = normalizeForRepeat(getText(last))
     const dropLast = lines.length > 1 && lastNorm && (lastCounts.get(lastNorm) ?? 0) >= threshold
 
     // Удаляем с конца, чтобы не сдвинуть индекс первой строки.
     if (dropLast) lines.splice(lines.length - 1, 1)
     if (dropFirst) lines.splice(0, 1)
   }
+}
 
-  // Всегда выбрасываем "голые" номера страниц, где бы они ни оказались.
+// Всегда выбрасывает "голые" номера страниц, где бы они ни оказались.
+function stripPageNumberLines<T>(pagesLines: T[][], getText: (item: T) => string): void {
   for (const lines of pagesLines) {
     for (let i = lines.length - 1; i >= 0; i--) {
-      const t = lines[i].text
+      const t = getText(lines[i])
       if (PAGE_NUMBER_RE.test(t) || PAGE_WORD_RE.test(t)) {
         lines.splice(i, 1)
       }
     }
   }
+}
+
+// 3. Подавление повторяющихся колонтитулов и номеров страниц (текстовый PDF).
+function stripHeadersFooters(pagesLines: Line[][]): void {
+  if (pagesLines.length < 3) return
+  suppressRepeatedFirstLast(pagesLines, (l) => l.text)
+  stripPageNumberLines(pagesLines, (l) => l.text)
+}
+
+// Публичный чистый эквивалент для построчного текста (используется OCR-
+// конвейером в ocrPdf.ts, где нет внутреннего типа Line). Та же логика:
+// голые номера страниц выбрасываются всегда, подавление повторяющихся
+// первой/последней строки — только когда страниц >= 3.
+export function stripRepeatedLinesAndPageNumbers(pages: string[][]): string[][] {
+  const working = pages.map((lines) => [...lines])
+  if (working.length >= 3) suppressRepeatedFirstLast(working, (t) => t)
+  stripPageNumberLines(working, (t) => t)
+  return working
 }
 
 function isAllCapsShort(text: string): boolean {

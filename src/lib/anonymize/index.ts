@@ -12,13 +12,19 @@ export interface AnonymizeProgress {
   chunks?: number
 }
 
-function normalizeValue(type: EntityType, value: string): string {
+export function normalizeValue(type: EntityType, value: string): string {
   const trimmed = value.trim().replace(/\s+/g, ' ')
   if (type === 'CARD' || type === 'IBAN' || type === 'ACCOUNT') {
     return trimmed.replace(/[\s-]/g, '').toUpperCase()
   }
   if (type === 'PERSON' || type === 'COMPANY' || type === 'ADDRESS' || type === 'EMAIL') {
     return trimmed.toLowerCase()
+  }
+  if (type === 'PHONE') {
+    return trimmed.replace(/[\s\-().]/g, '')
+  }
+  if (type === 'REG_NUMBER' || type === 'SWIFT') {
+    return trimmed.replace(/[\s-]/g, '').toUpperCase()
   }
   return trimmed
 }
@@ -135,7 +141,7 @@ export async function anonymizeMarkdown(
     const placeholder = `[${group.type}_${n}]`
     const positions = [...group.positions].sort((a, b) => a.start - b.start)
     return {
-      id: placeholder,
+      id: crypto.randomUUID(),
       type: group.type,
       value: group.firstValue,
       placeholder,
