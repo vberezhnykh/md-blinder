@@ -114,7 +114,7 @@ function EntityEditor({
           const positions = e.positions
             .map((p) => ({ start: changes.mapPos(p.start, 1), end: changes.mapPos(p.end, -1) }))
             .filter((p) => p.end > p.start)
-          return { ...e, positions, occurrences: positions.length }
+          return { ...e, positions }
         })
         .filter((e) => e.positions.length > 0)
       onChangeRef.current(nextText, nextEntities)

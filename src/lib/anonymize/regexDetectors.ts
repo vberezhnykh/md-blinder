@@ -67,6 +67,7 @@ function detectEmail(text: string): RawMatch[] {
 }
 
 function detectIban(text: string): RawMatch[] {
+  // Matches only upper-case IBANs ([A-Z]{2}\d{2}…); lower-case IBANs are not detected.
   const re = /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g
   const matches: RawMatch[] = []
   let m: RegExpExecArray | null

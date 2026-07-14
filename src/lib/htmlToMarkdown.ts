@@ -12,7 +12,7 @@ turndownService.use(gfm)
 // HTML. Preprocess: flatten paragraphs inside cells (multi-paragraph cells keep
 // line breaks via a {{BR}} sentinel restored to <br> after conversion), and
 // promote the first row to a <thead> of <th> so gfm converts the table.
-function preprocessTableHtml(html: string): string {
+export function preprocessTableHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   doc.querySelectorAll('table').forEach((table) => {
     table.querySelectorAll('td, th').forEach((cell) => {

@@ -15,6 +15,9 @@ function looksLikeLegacyDocByName(file: File) {
   return file.name.toLowerCase().endsWith('.doc') && !looksLikeDocxByName(file.name)
 }
 
+// Note: a file named *.pdf without the %PDF- magic bytes is still routed to the PDF path below
+// (via looksLikePdfByName); pdf.js then fails to parse it and that failure is surfaced as a
+// wrapped error upstream. This is intentional — behavior unchanged, documented here only.
 export async function detectFileKind(file: File): Promise<FileKind> {
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
 

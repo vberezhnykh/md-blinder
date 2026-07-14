@@ -18,7 +18,9 @@ export function entitiesToCsv(entities: Entity[], sourceText: string): string {
     entityCurrentValue(sourceText, e),
     String(e.positions.length),
   ])
-  return [header, ...rows]
+  const body = [header, ...rows]
     .map((row) => row.map(csvEscape).join(','))
     .join('\r\n')
+  // Excel (incl. Russian locale) needs an explicit separator hint to split columns correctly.
+  return 'sep=,\r\n' + body
 }

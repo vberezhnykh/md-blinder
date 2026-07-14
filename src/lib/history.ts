@@ -1,4 +1,4 @@
-import type { Entity } from './anonymize/types'
+import { ALL_ENTITY_TYPES, type Entity } from './anonymize/types'
 
 export interface HistoryDoc {
   id: string
@@ -68,6 +68,47 @@ export function serializeHistory(docs: HistoryDoc[]): string {
 
 const INVALID_EXPORT_ERROR = 'Файл не похож на экспорт истории MD Blinder'
 
+// Never throws: a malformed entity is dropped rather than crashing the import.
+// Unknown types are coerced to OTHER; positions are filtered to well-formed
+// { start, end } pairs, and an entity left with none is dropped entirely.
+export function sanitizeEntities(raw: unknown): Entity[] {
+  if (!Array.isArray(raw)) return []
+  const result: Entity[] = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue
+    const e = item as Record<string, unknown>
+    if (
+      typeof e.id !== 'string' ||
+      typeof e.value !== 'string' ||
+      typeof e.placeholder !== 'string' ||
+      typeof e.type !== 'string'
+    ) {
+      continue
+    }
+    const type = (ALL_ENTITY_TYPES as string[]).includes(e.type) ? (e.type as Entity['type']) : 'OTHER'
+
+    if (!Array.isArray(e.positions)) continue
+    const positions = e.positions
+      .map((p): { start: number; end: number } => {
+        const pos = (typeof p === 'object' && p !== null ? p : {}) as Record<string, unknown>
+        return { start: Number(pos.start), end: Number(pos.end) }
+      })
+      .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.end) && p.start < p.end)
+    if (positions.length === 0) continue
+
+    result.push({
+      id: e.id,
+      type,
+      value: e.value,
+      placeholder: e.placeholder,
+      positions,
+      anonymize: typeof e.anonymize === 'boolean' ? e.anonymize : true,
+      manual: Boolean(e.manual),
+    })
+  }
+  return result
+}
+
 export function parseHistory(json: string): HistoryDoc[] {
   let parsed: unknown
   try {
@@ -105,7 +146,7 @@ export function parseHistory(json: string): HistoryDoc[] {
       createdAt: typeof d.createdAt === 'number' ? d.createdAt : now,
       updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : now,
       sourceText: d.sourceText,
-      entities: d.entities as Entity[],
+      entities: sanitizeEntities(d.entities),
     }
   })
 }

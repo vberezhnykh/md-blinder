@@ -145,7 +145,6 @@ export async function anonymizeMarkdown(
       type: group.type,
       value: group.firstValue,
       placeholder,
-      occurrences: positions.length,
       positions,
       anonymize: true,
       manual: false,

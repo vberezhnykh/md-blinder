@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   addEntityFromSelection,
   buildAnonymizedText,
@@ -13,7 +13,6 @@ function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'placehol
   return {
     id: overrides.placeholder,
     value: '',
-    occurrences: overrides.positions.length,
     anonymize: true,
     manual: false,
     ...overrides,
@@ -81,6 +80,36 @@ describe('buildAnonymizedText', () => {
 
     const result = buildAnonymizedText(sourceText, [email, phone])
     expect(result).toBe('Email [EMAIL_1] and phone [PHONE_1] today')
+  })
+
+  it('drops one of two overlapping replacements instead of double-splicing', () => {
+    const sourceText = 'Contact Jane Doe today'
+    // Overlapping positions: a broken invariant that should never happen via
+    // normal app flow, but must not corrupt the output if it ever does.
+    const person = makeEntity({
+      type: 'PERSON',
+      placeholder: '[PERSON_1]',
+      value: 'Jane Doe',
+      positions: [{ start: 8, end: 16 }],
+    })
+    const other = makeEntity({
+      type: 'OTHER',
+      placeholder: '[OTHER_1]',
+      value: 'Doe today',
+      positions: [{ start: 13, end: 22 }],
+    })
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const result = buildAnonymizedText(sourceText, [person, other])
+
+    // Exactly one of the two placeholders survives, and the text is a valid
+    // splice (no doubled/garbled text from applying both overlapping ranges).
+    const hasPerson = result.includes('[PERSON_1]')
+    const hasOther = result.includes('[OTHER_1]')
+    expect(hasPerson !== hasOther).toBe(true)
+    expect(warnSpy).toHaveBeenCalled()
+
+    warnSpy.mockRestore()
   })
 })
 
@@ -182,7 +211,7 @@ describe('addEntityFromSelection', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0].placeholder).toBe('[COMPANY_1]')
-    expect(result[0].occurrences).toBe(2)
+    expect(result[0].positions).toHaveLength(2)
     expect(result[0].positions).toEqual([
       { start: 0, end: 8 },
       { start: 13, end: 21 },
@@ -330,7 +359,6 @@ describe('dedupeEntityIds', () => {
       type: 'PERSON',
       value: 'John',
       placeholder: '[PERSON_1]',
-      occurrences: 1,
       positions: [{ start: 0, end: 4 }],
       anonymize: true,
       manual: false,
@@ -340,7 +368,6 @@ describe('dedupeEntityIds', () => {
       type: 'COMPANY',
       value: 'Acme',
       placeholder: '[COMPANY_1]',
-      occurrences: 1,
       positions: [{ start: 10, end: 14 }],
       anonymize: true,
       manual: false,
@@ -362,7 +389,6 @@ describe('dedupeEntityIds', () => {
       type: 'PERSON',
       value: 'John',
       placeholder: '[PERSON_1]',
-      occurrences: 1,
       positions: [{ start: 0, end: 4 }],
       anonymize: true,
       manual: false,
@@ -372,7 +398,6 @@ describe('dedupeEntityIds', () => {
       type: 'COMPANY',
       value: 'Acme',
       placeholder: '[COMPANY_1]',
-      occurrences: 1,
       positions: [{ start: 10, end: 14 }],
       anonymize: true,
       manual: false,

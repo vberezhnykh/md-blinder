@@ -1,7 +1,10 @@
 import type { Entity, EntityType } from './types'
 
 // Replace every ACTIVE (anonymize:true) entity occurrence with its placeholder,
-// splicing back-to-front so earlier offsets stay valid.
+// splicing back-to-front so earlier offsets stay valid. This assumes positions
+// are non-overlapping; as a safety net against a broken invariant (e.g. a
+// hand-edited import), any replacement that overlaps the previously-accepted
+// one (scanning right-to-left) is skipped rather than double-splicing.
 export function buildAnonymizedText(sourceText: string, entities: Entity[]): string {
   const repl: { start: number; end: number; placeholder: string }[] = []
   for (const e of entities) {
@@ -9,8 +12,24 @@ export function buildAnonymizedText(sourceText: string, entities: Entity[]): str
     for (const p of e.positions) repl.push({ start: p.start, end: p.end, placeholder: e.placeholder })
   }
   repl.sort((a, b) => b.start - a.start)
+
+  const accepted: typeof repl = []
+  let prevStart = Infinity
+  let droppedOverlap = false
+  for (const r of repl) {
+    if (r.end <= prevStart) {
+      accepted.push(r)
+      prevStart = r.start
+    } else {
+      droppedOverlap = true
+    }
+  }
+  if (droppedOverlap) {
+    console.warn('buildAnonymizedText: dropped overlapping replacement(s) to avoid double-splicing')
+  }
+
   let out = sourceText
-  for (const r of repl) out = out.slice(0, r.start) + r.placeholder + out.slice(r.end)
+  for (const r of accepted) out = out.slice(0, r.start) + r.placeholder + out.slice(r.end)
   return out
 }
 
@@ -51,7 +70,7 @@ export function addEntityFromSelection(
   const working = entities
     .map((e) => {
       const positions = e.positions.filter((p) => !(from < p.end && p.start < to))
-      return { ...e, positions, occurrences: positions.length }
+      return { ...e, positions }
     })
     .filter((e) => e.positions.length > 0)
 
@@ -78,7 +97,6 @@ export function addEntityFromSelection(
     type,
     value: selected,
     placeholder,
-    occurrences: positions.length,
     positions,
     anonymize: true,
     manual: true,

@@ -6,7 +6,6 @@ function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'placehol
   return {
     id: overrides.placeholder,
     value: '',
-    occurrences: overrides.positions.length,
     anonymize: true,
     manual: false,
     ...overrides,
@@ -14,9 +13,14 @@ function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'placehol
 }
 
 describe('entitiesToCsv', () => {
+  it('starts with the sep=, hint line for Excel', () => {
+    const csv = entitiesToCsv([], '')
+    expect(csv.split('\r\n')[0]).toBe('sep=,')
+  })
+
   it('has the exact expected header row', () => {
     const csv = entitiesToCsv([], '')
-    expect(csv.split('\r\n')[0]).toBe('Плейсхолдер,Тип,Оригинальное значение,Вхождений')
+    expect(csv.split('\r\n')[1]).toBe('Плейсхолдер,Тип,Оригинальное значение,Вхождений')
   })
 
   it('includes only active (anonymize:true) entities', () => {
@@ -60,7 +64,7 @@ describe('entitiesToCsv', () => {
     })
 
     const csv = entitiesToCsv([entity], sourceText)
-    const row = csv.split('\r\n')[1]
+    const row = csv.split('\r\n')[2]
     expect(row).toBe('[PERSON_1],PERSON,John Smith,2')
   })
 
@@ -76,7 +80,7 @@ describe('entitiesToCsv', () => {
     })
 
     const csv = entitiesToCsv([entity], sourceText)
-    const row = csv.split('\r\n')[1]
+    const row = csv.split('\r\n')[2]
     expect(row).toBe('[COMPANY_1],COMPANY,"Acme, Ltd",1')
   })
 
@@ -92,7 +96,7 @@ describe('entitiesToCsv', () => {
     })
 
     const csv = entitiesToCsv([entity], sourceText)
-    const row = csv.split('\r\n')[1]
+    const row = csv.split('\r\n')[2]
     expect(row).toBe('[COMPANY_1],COMPANY,"""Acme""",1')
   })
 
@@ -108,7 +112,7 @@ describe('entitiesToCsv', () => {
     })
 
     const csv = entitiesToCsv([entity], sourceText)
-    const row = csv.split('\r\n')[1]
+    const row = csv.split('\r\n')[2]
     const valueField = row.split(',')[2]
     expect(valueField.startsWith("'")).toBe(true)
     expect(valueField).toBe("'=SUM(A1)")
@@ -127,7 +131,7 @@ describe('entitiesToCsv', () => {
 
     const csv = entitiesToCsv([entity], sourceText)
     const rows = csv.split('\r\n')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(3)
     expect(csv).not.toContain('\n\n')
   })
 })

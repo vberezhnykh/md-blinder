@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serializeHistory, parseHistory, mergeDocs, type HistoryDoc } from './history'
+import { serializeHistory, parseHistory, sanitizeEntities, mergeDocs, type HistoryDoc } from './history'
 import type { Entity } from './anonymize/types'
 
 function makeEntity(overrides: Partial<Entity> = {}): Entity {
@@ -8,7 +8,6 @@ function makeEntity(overrides: Partial<Entity> = {}): Entity {
     type: 'PERSON',
     value: 'Иван Иванов',
     placeholder: '[PERSON_1]',
-    occurrences: 1,
     positions: [{ start: 0, end: 10 }],
     anonymize: true,
     manual: false,
@@ -81,6 +80,93 @@ describe('parseHistory validation', () => {
     expect(doc.createdAt).toBeLessThanOrEqual(after)
     expect(doc.updatedAt).toBeGreaterThanOrEqual(before)
     expect(doc.updatedAt).toBeLessThanOrEqual(after)
+  })
+})
+
+describe('sanitizeEntities', () => {
+  it('drops malformed entities but keeps the valid ones, coercing unknown types to OTHER', () => {
+    const valid = makeEntity()
+    const raw = [
+      {}, // missing id/value/placeholder/type
+      { ...makeEntity({ id: 'e2' }), positions: null }, // positions not an array
+      { ...makeEntity({ id: 'e3' }), type: 'ALIEN_TYPE' }, // unknown type
+      { ...makeEntity({ id: 'e4' }), positions: [{ start: 'x', end: 5 }, { start: 5, end: 3 }] }, // non-numeric / start>=end
+      valid,
+    ]
+
+    const result = sanitizeEntities(raw)
+
+    expect(result).toHaveLength(2)
+    const ids = result.map((e) => e.id)
+    expect(ids).toContain('e3')
+    expect(ids).toContain('e1')
+    const coerced = result.find((e) => e.id === 'e3')
+    expect(coerced?.type).toBe('OTHER')
+    const stillValid = result.find((e) => e.id === 'e1')
+    expect(stillValid?.type).toBe('PERSON')
+  })
+
+  it('returns an empty array for non-array input', () => {
+    expect(sanitizeEntities(null)).toEqual([])
+    expect(sanitizeEntities(undefined)).toEqual([])
+    expect(sanitizeEntities('not an array')).toEqual([])
+  })
+
+  it('keeps only the valid positions of an otherwise-valid entity', () => {
+    const raw = [
+      {
+        ...makeEntity(),
+        positions: [
+          { start: 0, end: 10 },
+          { start: 'a', end: 5 },
+          { start: 8, end: 8 },
+          { start: 20, end: 15 },
+        ],
+      },
+    ]
+    const result = sanitizeEntities(raw)
+    expect(result).toHaveLength(1)
+    expect(result[0].positions).toEqual([{ start: 0, end: 10 }])
+  })
+})
+
+describe('parseHistory entity validation', () => {
+  it('drops malformed entities within a document without rejecting the document', () => {
+    const raw = {
+      app: 'md-blinder',
+      kind: 'history',
+      version: 1,
+      exportedAt: Date.now(),
+      documents: [
+        {
+          id: 'doc-x',
+          name: 'mixed.docx',
+          sourceText: 'Hello world',
+          entities: [
+            {}, // fully malformed
+            { ...makeEntity({ id: 'p-null' }), positions: null },
+            { ...makeEntity({ id: 'p-unknown-type' }), type: 'NOT_A_TYPE' },
+            {
+              ...makeEntity({ id: 'p-bad-pos' }),
+              positions: [{ start: 5, end: 2 }],
+            },
+            makeEntity({ id: 'p-good' }),
+          ],
+        },
+      ],
+    }
+
+    const [doc] = parseHistory(JSON.stringify(raw))
+
+    const ids = doc.entities.map((e) => e.id)
+    expect(ids).toEqual(['p-unknown-type', 'p-good'])
+    expect(doc.entities.find((e) => e.id === 'p-unknown-type')?.type).toBe('OTHER')
+  })
+
+  it('leaves a normal round-trip export/import unchanged', () => {
+    const doc = makeDoc()
+    const [parsed] = parseHistory(serializeHistory([doc]))
+    expect(parsed.entities).toEqual(doc.entities)
   })
 })
 

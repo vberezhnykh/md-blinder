@@ -67,6 +67,7 @@ function App() {
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [historyError, setHistoryError] = useState('')
   const currentMetaRef = useRef<{ name: string; format: 'docx' | 'pdf'; createdAt: number } | null>(null)
+  const justOpenedRef = useRef(false)
 
   const refreshHistory = useCallback(() => {
     loadAllDocs().then(setHistory).catch(() => {})
@@ -105,6 +106,10 @@ function App() {
     const meta = currentMetaRef.current
     if (!id || !meta) return
     if (sourceText === '') return
+    if (justOpenedRef.current) {
+      justOpenedRef.current = false
+      return
+    }
     const t = setTimeout(() => {
       putDoc({ id, name: meta.name, format: meta.format, createdAt: meta.createdAt, updatedAt: Date.now(), sourceText, entities })
         .then(refreshHistory)
@@ -120,6 +125,7 @@ function App() {
     setNerNotice(false)
     setCurrentDocId(doc.id)
     currentMetaRef.current = { name: doc.name, format: doc.format, createdAt: doc.createdAt }
+    justOpenedRef.current = true
     setView('editor')
     setStatus('idle')
     setHasResult(true)
@@ -130,7 +136,6 @@ function App() {
     deleteDoc(id).then(refreshHistory).catch(() => {})
     setCurrentDocId((cur) => {
       if (cur === id) {
-        currentMetaRef.current = null
         return null
       }
       return cur
@@ -275,7 +280,11 @@ function App() {
   const handleEditorChange = useCallback((nextText: string, nextEntities: Entity[]) => {
     setSourceText(nextText)
     setEntities(nextEntities)
-  }, [])
+    if (currentDocId === null && nextText.trim() !== '' && currentMetaRef.current) {
+      setCurrentDocId(crypto.randomUUID())
+      currentMetaRef.current = { ...currentMetaRef.current, createdAt: Date.now() }
+    }
+  }, [currentDocId])
 
   const handleSelectEntity = useCallback((entity: Entity) => {
     const p = entity.positions[0]

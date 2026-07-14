@@ -4,3 +4,17 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Security headers. CSP allow-list reflects the only external hosts the app
+# contacts at runtime: huggingface.co (GLiNER NER model + tokenizer) and
+# cdn.jsdelivr.net (onnxruntime-web WASM, and the Tesseract worker/core/lang
+# data). Everything else is same-origin. 'wasm-unsafe-eval' is required by
+# onnxruntime-web; worker-src blob: is required because Tesseract.js spawns its
+# worker from a blob URL. See AUD-4.1.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    X-Frame-Options = "DENY"

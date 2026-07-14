@@ -19,7 +19,6 @@ export interface Entity {
   type: EntityType
   value: string          // canonical original value (first occurrence)
   placeholder: string    // e.g. [COMPANY_1]
-  occurrences: number
   positions: { start: number; end: number }[]
   anonymize: boolean     // default true (Stage 5 will toggle)
   manual: boolean        // default false
