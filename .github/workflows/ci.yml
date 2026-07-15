@@ -19,8 +19,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `npm install`, not `npm ci`: the lockfile is generated on Windows, and
+      # vite 8 / rolldown's platform-specific optional native bindings resolve
+      # their transitive deps (e.g. @emnapi/core) differently on Linux, so the
+      # strict `npm ci` sync check fails on the CI runner ("Missing … from lock
+      # file"). `npm install` reconciles those optional deps for the runner's
+      # platform without weakening the lint/test signal.
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Lint
         run: npm run lint
