@@ -65,12 +65,23 @@ for (const file of files) {
   const errText = await page.$eval('.status.error', (el) => el.textContent).catch(() => null)
   const nerNotice = await page.$('.ner-notice').then((el) => !!el)
 
-  const entities = await page.$$eval('.entity-row', (rows) =>
+  // Confirmed detections only — candidate rows also carry the .entity-row
+  // class, so they must be excluded here to stay comparable to the
+  // pre-stage-5 baseline (which only ever saw confirmed entities).
+  const entities = await page.$$eval('.entity-row:not(.candidate-row)', (rows) =>
     rows.map((row) => ({
       placeholder: row.querySelector('.cell-placeholder')?.textContent?.trim() ?? '',
       type: row.querySelector('select')?.value ?? '',
       value: row.querySelector('.cell-value')?.textContent?.trim() ?? '',
       count: Number(row.querySelector('.cell-count')?.textContent?.trim() ?? '0'),
+    })),
+  )
+
+  // Gray-zone review candidates (Stage 5) — tracked separately from `entities`.
+  const candidates = await page.$$eval('.candidate-row', (rows) =>
+    rows.map((row) => ({
+      type: row.querySelector('select')?.value ?? '',
+      value: row.querySelector('.cell-value')?.textContent?.trim() ?? '',
     })),
   )
 
@@ -116,12 +127,13 @@ for (const file of files) {
     error: errText,
     nerNotice,
     entities,
+    candidates,
     sourceText,
     pageErrors: errors.slice(0, 10),
   }
 
   await context.close()
-  console.error(`[done] ${basename(file)} -> ${entities.length} entities${errText ? ' (ERROR: ' + errText + ')' : ''}`)
+  console.error(`[done] ${basename(file)} -> ${entities.length} entities +${candidates.length} candidates${errText ? ' (ERROR: ' + errText + ')' : ''}`)
 }
 
 await browser.close()
