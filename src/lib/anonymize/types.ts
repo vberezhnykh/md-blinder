@@ -12,6 +12,7 @@ export interface RawMatch {
   value: string   // exact matched substring
   start: number   // char offset in source markdown
   end: number     // exclusive
+  score?: number   // NER confidence (undefined for structural regex matches)
 }
 
 export interface Entity {
@@ -22,6 +23,9 @@ export interface Entity {
   positions: { start: number; end: number }[]
   anonymize: boolean     // default true (Stage 5 will toggle)
   manual: boolean        // default false
+  score?: number          // уверенность NER репрезентативного матча (undefined для структурных/ручных)
+  candidate?: boolean     // true = непроверенный кандидат «серой зоны»; не идёт в вывод, пока не принят
+  candidateNote?: string  // причина попадания в кандидаты, показывается в UI
 }
 
 export interface AnonymizationResult {

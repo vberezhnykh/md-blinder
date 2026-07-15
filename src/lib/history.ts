@@ -96,7 +96,7 @@ export function sanitizeEntities(raw: unknown): Entity[] {
       .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.end) && p.start < p.end)
     if (positions.length === 0) continue
 
-    result.push({
+    const out: Entity = {
       id: e.id,
       type,
       value: e.value,
@@ -104,7 +104,11 @@ export function sanitizeEntities(raw: unknown): Entity[] {
       positions,
       anonymize: typeof e.anonymize === 'boolean' ? e.anonymize : true,
       manual: Boolean(e.manual),
-    })
+    }
+    if (typeof e.score === 'number') out.score = e.score
+    if (e.candidate === true) out.candidate = true
+    if (typeof e.candidateNote === 'string') out.candidateNote = e.candidateNote
+    result.push(out)
   }
   return result
 }

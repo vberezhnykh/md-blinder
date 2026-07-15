@@ -8,14 +8,28 @@ interface EntityListProps {
   onChangeType: (id: string, type: EntityType) => void
   onDelete: (id: string) => void
   onSelect?: (entity: Entity) => void
+  onAcceptCandidate?: (id: string) => void
+  onRejectCandidate?: (id: string) => void
 }
 
 function minStart(e: Entity): number {
   return e.positions.length ? Math.min(...e.positions.map((p) => p.start)) : Infinity
 }
 
-function EntityList({ entities, sourceText, onToggle, onChangeType, onDelete, onSelect }: EntityListProps) {
-  if (!entities.length) {
+function EntityList({
+  entities,
+  sourceText,
+  onToggle,
+  onChangeType,
+  onDelete,
+  onSelect,
+  onAcceptCandidate,
+  onRejectCandidate,
+}: EntityListProps) {
+  const confirmed = entities.filter((e) => !e.candidate)
+  const candidates = entities.filter((e) => e.candidate)
+
+  if (!confirmed.length && !candidates.length) {
     return (
       <div className="entity-pane">
         <h3>Сущности</h3>
@@ -24,11 +38,11 @@ function EntityList({ entities, sourceText, onToggle, onChangeType, onDelete, on
     )
   }
 
-  const sorted = [...entities].sort((a, b) => minStart(a) - minStart(b))
+  const sorted = [...confirmed].sort((a, b) => minStart(a) - minStart(b))
 
   return (
     <div className="entity-pane">
-      <h3>Сущности ({entities.length})</h3>
+      <h3>Сущности ({confirmed.length})</h3>
       {sorted.map((entity) => {
         const value = entityCurrentValue(sourceText, entity)
         return (
@@ -79,6 +93,61 @@ function EntityList({ entities, sourceText, onToggle, onChangeType, onDelete, on
           </div>
         )
       })}
+      {candidates.length > 0 && (
+        <div className="candidates-section">
+          <h3>Проверьте вручную ({candidates.length})</h3>
+          {[...candidates]
+            .sort((a, b) => minStart(a) - minStart(b))
+            .map((entity) => {
+              const value = entityCurrentValue(sourceText, entity)
+              return (
+                <div className="entity-row candidate-row" key={entity.id}>
+                  <span
+                    className="cell-value"
+                    title={value}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelect?.(entity)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onSelect?.(entity)
+                      }
+                    }}
+                  >
+                    {value}
+                  </span>
+                  <select
+                    value={entity.type}
+                    onChange={(e) => onChangeType(entity.id, e.target.value as EntityType)}
+                  >
+                    {ALL_ENTITY_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="entity-accept"
+                    title="Принять"
+                    onClick={() => onAcceptCandidate?.(entity.id)}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    type="button"
+                    className="entity-delete"
+                    title="Отклонить"
+                    onClick={() => onRejectCandidate?.(entity.id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              )
+            })}
+        </div>
+      )}
     </div>
   )
 }

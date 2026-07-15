@@ -120,4 +120,64 @@ describe('anonymizeMarkdown', () => {
     expect(company).toBeDefined()
     expect(company?.value).toBe(companyValue)
   })
+
+  it('B1: a NER match at confirm-level score becomes a confirmed entity in the output', async () => {
+    const markdown = 'Meeting with Ann Baker tomorrow.'
+    const value = 'Ann Baker'
+    const start = markdown.indexOf(value)
+
+    const nerMatches: RawMatch[] = [
+      { type: 'PERSON', value, start, end: start + value.length, score: 0.4 },
+    ]
+    mockedDetectEntitiesNer.mockResolvedValueOnce(nerMatches)
+
+    const { result } = await anonymizeMarkdown(markdown)
+
+    const person = result.entities.find((e) => e.type === 'PERSON' && e.value === value)
+    expect(person).toBeDefined()
+    expect(person?.candidate).toBeFalsy()
+    expect(person?.anonymize).toBe(true)
+    expect(result.markdown).toContain(person!.placeholder)
+  })
+
+  it('B1: a NER match below the confirm threshold becomes a gray-zone candidate, excluded from the output', async () => {
+    const markdown = 'Perhaps Cy Vance was mentioned.'
+    const value = 'Cy Vance'
+    const start = markdown.indexOf(value)
+
+    const nerMatches: RawMatch[] = [
+      { type: 'PERSON', value, start, end: start + value.length, score: 0.2 },
+    ]
+    mockedDetectEntitiesNer.mockResolvedValueOnce(nerMatches)
+
+    const { result } = await anonymizeMarkdown(markdown)
+
+    const person = result.entities.find((e) => e.type === 'PERSON' && e.value === value)
+    expect(person).toBeDefined()
+    expect(person?.candidate).toBe(true)
+    expect(person?.anonymize).toBe(false)
+    expect(result.markdown).not.toContain(person!.placeholder)
+  })
+
+  it('B1: confirmed entities are numbered before gray-zone candidates of the same type', async () => {
+    const markdown = 'Signed by Tom Reed. Possibly Sam Kerr too.'
+    const confirmedValue = 'Tom Reed'
+    const candidateValue = 'Sam Kerr'
+    const confirmedStart = markdown.indexOf(confirmedValue)
+    const candidateStart = markdown.indexOf(candidateValue)
+
+    const nerMatches: RawMatch[] = [
+      { type: 'PERSON', value: confirmedValue, start: confirmedStart, end: confirmedStart + confirmedValue.length, score: 0.5 },
+      { type: 'PERSON', value: candidateValue, start: candidateStart, end: candidateStart + candidateValue.length, score: 0.2 },
+    ]
+    mockedDetectEntitiesNer.mockResolvedValueOnce(nerMatches)
+
+    const { result } = await anonymizeMarkdown(markdown)
+
+    const confirmed = result.entities.find((e) => e.value === confirmedValue)
+    const candidate = result.entities.find((e) => e.value === candidateValue)
+    expect(confirmed?.placeholder).toBe('[PERSON_1]')
+    expect(candidate?.placeholder).toBe('[PERSON_2]')
+    expect(candidate?.candidate).toBe(true)
+  })
 })

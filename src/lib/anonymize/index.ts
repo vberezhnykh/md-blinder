@@ -3,6 +3,7 @@ import { detectEntitiesNer } from './ner'
 import { buildAnonymizedText } from './apply'
 import { stitchAddressRuns } from './stitchAddress'
 import { filterGenericNerMatches } from './nerFilter'
+import { NER_CONFIRM_THRESHOLD, NER_GRAY_ZONE_LOW } from './config'
 import type { AnonymizationResult, Entity, EntityType, RawMatch } from './types'
 
 export interface AnonymizeProgress {
@@ -36,6 +37,20 @@ function overlaps(a: RawMatch, b: RawMatch): boolean {
 function byStartThenLonger(a: RawMatch, b: RawMatch): number {
   if (a.start !== b.start) return a.start - b.start
   return b.end - b.start - (a.end - a.start)
+}
+
+// Матч "серой зоны" — NER отдал скор ниже порога подтверждения. Структурные
+// (regex) матчи и ручные добавления не несут score ⇒ всегда подтверждённые.
+function isConfirmedLevel(m: RawMatch): boolean {
+  return !(typeof m.score === 'number' && m.score < NER_CONFIRM_THRESHOLD)
+}
+
+// Максимум ОПРЕДЕЛЁННЫХ скоров (для отображения в UI). В отличие от stitchAddress,
+// undefined здесь просто игнорируется, а не "побеждает".
+function maxDefinedScore(a: number | undefined, b: number | undefined): number | undefined {
+  if (a === undefined) return b
+  if (b === undefined) return a
+  return Math.max(a, b)
 }
 
 // Structural (regex) matches are accepted first so they win any overlap
@@ -81,13 +96,19 @@ export async function anonymizeMarkdown(
 
   const filteredNer = filterGenericNerMatches(ner)
   const stitchedNer = stitchAddressRuns(filteredNer, markdown)
-  const accepted = resolveOverlaps(structural, stitchedNer)
+  // Защита: матч с уверенностью ниже минимума серой зоны отбрасывается (в норме
+  // такого не бывает — worker уже фильтрует по этому порогу).
+  const accepted = resolveOverlaps(structural, stitchedNer).filter(
+    (m) => !(typeof m.score === 'number' && m.score < NER_GRAY_ZONE_LOW),
+  )
 
   interface Group {
     type: EntityType
     firstValue: string
     firstStart: number
     positions: { start: number; end: number }[]
+    confirmed: boolean
+    maxScore: number | undefined
   }
 
   const groups = new Map<string, Group>()
@@ -95,9 +116,18 @@ export async function anonymizeMarkdown(
     const key = `${m.type} ${normalizeValue(m.type, m.value)}`
     let group = groups.get(key)
     if (!group) {
-      group = { type: m.type, firstValue: m.value, firstStart: m.start, positions: [] }
+      group = {
+        type: m.type,
+        firstValue: m.value,
+        firstStart: m.start,
+        positions: [],
+        confirmed: isConfirmedLevel(m),
+        maxScore: m.score,
+      }
       groups.set(key, group)
     }
+    group.confirmed = group.confirmed || isConfirmedLevel(m)
+    group.maxScore = maxDefinedScore(group.maxScore, m.score)
     group.positions.push({ start: m.start, end: m.end })
   }
 
@@ -117,7 +147,9 @@ export async function anonymizeMarkdown(
       const short = addrGroups[j]
       if (absorbed.has(short)) continue
       const shortNorm = normalizeValue('ADDRESS', short.firstValue)
-      if (longNorm.includes(shortNorm)) {
+      // Никогда не сливаем кандидата «серой зоны» в подтверждённый адрес (и наоборот) —
+      // это молча повысило бы/понизило бы уверенность объединённой сущности.
+      if (longNorm.includes(shortNorm) && long.confirmed === short.confirmed) {
         // Вливаем только непересекающиеся позиции, чтобы не получить две замены
         // на одном месте (splice в buildAnonymizedText их бы задвоил).
         for (const sp of short.positions) {
@@ -132,24 +164,49 @@ export async function anonymizeMarkdown(
   }
   for (const g of absorbed) groups.delete(`${g.type} ${normalizeValue(g.type, g.firstValue)}`)
 
-  const orderedGroups = [...groups.values()].sort((a, b) => a.firstStart - b.firstStart)
+  // Подтверждённые сущности нумеруются первыми, кандидаты «серой зоны» — следом,
+  // по общему счётчику на тип. Так номер плейсхолдера кандидата всегда больше
+  // номеров подтверждённых сущностей того же типа — принятие кандидата (B1)
+  // никогда не коллизирует с уже существующим плейсхолдером.
+  const confirmedGroups = [...groups.values()]
+    .filter((g) => g.confirmed)
+    .sort((a, b) => a.firstStart - b.firstStart)
+  const candidateGroups = [...groups.values()]
+    .filter((g) => !g.confirmed)
+    .sort((a, b) => a.firstStart - b.firstStart)
 
   const typeCounters = new Map<EntityType, number>()
-  const entities: Entity[] = orderedGroups.map((group) => {
-    const n = (typeCounters.get(group.type) ?? 0) + 1
-    typeCounters.set(group.type, n)
-    const placeholder = `[${group.type}_${n}]`
-    const positions = [...group.positions].sort((a, b) => a.start - b.start)
-    return {
-      id: crypto.randomUUID(),
-      type: group.type,
-      value: group.firstValue,
-      placeholder,
-      positions,
-      anonymize: true,
-      manual: false,
-    }
-  })
+  const nextPlaceholder = (type: EntityType): string => {
+    const n = (typeCounters.get(type) ?? 0) + 1
+    typeCounters.set(type, n)
+    return `[${type}_${n}]`
+  }
+
+  const confirmedEntities: Entity[] = confirmedGroups.map((group) => ({
+    id: crypto.randomUUID(),
+    type: group.type,
+    value: group.firstValue,
+    placeholder: nextPlaceholder(group.type),
+    positions: [...group.positions].sort((a, b) => a.start - b.start),
+    anonymize: true,
+    manual: false,
+    score: group.maxScore,
+  }))
+
+  const candidateEntities: Entity[] = candidateGroups.map((group) => ({
+    id: crypto.randomUUID(),
+    type: group.type,
+    value: group.firstValue,
+    placeholder: nextPlaceholder(group.type),
+    positions: [...group.positions].sort((a, b) => a.start - b.start),
+    anonymize: false,
+    manual: false,
+    candidate: true,
+    candidateNote: 'Низкая уверенность модели',
+    score: group.maxScore,
+  }))
+
+  const entities: Entity[] = [...confirmedEntities, ...candidateEntities]
 
   const anonymized = buildAnonymizedText(markdown, entities)
 

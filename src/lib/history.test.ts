@@ -112,6 +112,23 @@ describe('sanitizeEntities', () => {
     expect(sanitizeEntities('not an array')).toEqual([])
   })
 
+  it('preserves candidate, candidateNote, and score fields', () => {
+    const raw = [
+      makeEntity({
+        id: 'cand-1',
+        candidate: true,
+        candidateNote: 'Низкая уверенность модели',
+        score: 0.2,
+        anonymize: false,
+      }),
+    ]
+    const result = sanitizeEntities(raw)
+    expect(result).toHaveLength(1)
+    expect(result[0].candidate).toBe(true)
+    expect(result[0].candidateNote).toBe('Низкая уверенность модели')
+    expect(result[0].score).toBe(0.2)
+  })
+
   it('keeps only the valid positions of an otherwise-valid entity', () => {
     const raw = [
       {

@@ -1,5 +1,6 @@
 import type { RawMatch } from './types'
 import { stripInlineFormatting, remapMatches } from './stripFormatting'
+import { NER_GRAY_ZONE_LOW } from './config'
 
 export interface NerProgress {
   stage: 'load' | 'detect'
@@ -88,7 +89,7 @@ export async function detectEntitiesNer(
       requestId,
       text: plain,
       labels: ['person', 'company', 'address', 'registration number'],
-      threshold: 0.3,
+      threshold: NER_GRAY_ZONE_LOW,
     })
   })
 }

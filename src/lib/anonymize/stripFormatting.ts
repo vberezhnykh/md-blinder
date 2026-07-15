@@ -31,6 +31,7 @@ export function remapMatches(matches: RawMatch[], plain: string, map: number[]):
       value: plain.slice(m.start, m.end),
       start: map[m.start],
       end: map[endIdx] + 1,
+      score: m.score,
     })
   }
   return out

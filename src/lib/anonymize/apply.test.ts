@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  acceptCandidate,
   addEntityFromSelection,
   buildAnonymizedText,
   changeEntityType,
@@ -7,6 +8,7 @@ import {
   entityCurrentValue,
   nextPlaceholderNumber,
 } from './apply'
+import { hasPlaceholderCollision } from './placeholderGuard'
 import type { Entity } from './types'
 
 function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'placeholder' | 'positions'>): Entity {
@@ -110,6 +112,26 @@ describe('buildAnonymizedText', () => {
     expect(warnSpy).toHaveBeenCalled()
 
     warnSpy.mockRestore()
+  })
+
+  it('B4: escapes a pre-existing placeholder-like literal not tied to any entity', () => {
+    const sourceText = 'Existing note [PERSON_1] refers to an earlier draft.'
+    const result = buildAnonymizedText(sourceText, [])
+    expect(hasPlaceholderCollision(result)).toBe(false)
+  })
+
+  it('B4: a real entity still gets its genuine placeholder substituted (fresh entity, unrelated source)', () => {
+    const sourceText = 'John Doe signed the agreement.'
+    const johnStart = sourceText.indexOf('John Doe')
+    const john = makeEntity({
+      type: 'PERSON',
+      placeholder: '[PERSON_1]',
+      value: 'John Doe',
+      positions: [{ start: johnStart, end: johnStart + 'John Doe'.length }],
+    })
+
+    const result = buildAnonymizedText(sourceText, [john])
+    expect(result).toContain('[PERSON_1]')
   })
 })
 
@@ -405,5 +427,73 @@ describe('dedupeEntityIds', () => {
     const result = dedupeEntityIds([a, b])
 
     expect(result.map((e) => e.id)).toEqual(['id-a', 'id-b'])
+  })
+})
+
+describe('acceptCandidate', () => {
+  it('accepting sets candidate:false, anonymize:true, and recomputes a non-colliding placeholder', () => {
+    const confirmed: Entity = {
+      id: 'confirmed-1',
+      type: 'PERSON',
+      value: 'John Doe',
+      placeholder: '[PERSON_1]',
+      positions: [{ start: 0, end: 8 }],
+      anonymize: true,
+      manual: false,
+    }
+    const candidate: Entity = {
+      id: 'candidate-1',
+      type: 'PERSON',
+      value: 'Jane Roe',
+      placeholder: '[PERSON_2]',
+      positions: [{ start: 20, end: 28 }],
+      anonymize: false,
+      manual: false,
+      candidate: true,
+      candidateNote: 'Низкая уверенность модели',
+      score: 0.2,
+    }
+
+    const result = acceptCandidate([confirmed, candidate], 'candidate-1')
+
+    const accepted = result.find((e) => e.id === 'candidate-1')!
+    expect(accepted.candidate).toBe(false)
+    expect(accepted.candidateNote).toBeUndefined()
+    expect(accepted.anonymize).toBe(true)
+    expect(accepted.placeholder).toBe('[PERSON_2]')
+
+    const placeholders = result.map((e) => e.placeholder)
+    expect(new Set(placeholders).size).toBe(placeholders.length)
+  })
+
+  it('is a no-op when accepting a non-candidate id', () => {
+    const confirmed: Entity = {
+      id: 'confirmed-1',
+      type: 'PERSON',
+      value: 'John Doe',
+      placeholder: '[PERSON_1]',
+      positions: [{ start: 0, end: 8 }],
+      anonymize: true,
+      manual: false,
+    }
+    const entities = [confirmed]
+    const result = acceptCandidate(entities, 'confirmed-1')
+    expect(result).toBe(entities)
+  })
+
+  it('is a no-op when the id does not exist', () => {
+    const entities: Entity[] = [
+      {
+        id: 'confirmed-1',
+        type: 'PERSON',
+        value: 'John Doe',
+        placeholder: '[PERSON_1]',
+        positions: [{ start: 0, end: 8 }],
+        anonymize: true,
+        manual: false,
+      },
+    ]
+    const result = acceptCandidate(entities, 'no-such-id')
+    expect(result).toBe(entities)
   })
 })

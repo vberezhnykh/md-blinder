@@ -1,4 +1,5 @@
 import type { Entity, EntityType } from './types'
+import { findPlaceholderRanges, escapePlaceholderLiteral } from './placeholderGuard'
 
 // Replace every ACTIVE (anonymize:true) entity occurrence with its placeholder,
 // splicing back-to-front so earlier offsets stay valid. This assumes positions
@@ -6,19 +7,51 @@ import type { Entity, EntityType } from './types'
 // hand-edited import), any replacement that overlaps the previously-accepted
 // one (scanning right-to-left) is skipped rather than double-splicing.
 export function buildAnonymizedText(sourceText: string, entities: Entity[]): string {
+  return buildAnonymizedTextWithMap(sourceText, entities).text
+}
+
+export interface AnonSegment {
+  outStart: number   // offset in anonymized text (inclusive)
+  outEnd: number     // exclusive
+  srcStart: number   // offset in source text
+  srcEnd: number     // exclusive
+  opaque: boolean    // true = inserted placeholder / escaped literal (no linear source mapping)
+}
+
+// Как buildAnonymizedText, но дополнительно возвращает карту сегментов для
+// обратного пересчёта офсетов (нужно контрольному проходу B2). Порядок разрешения
+// пересечений тот же (скан справа-налево, побеждает больший start), поэтому текст
+// побайтово совпадает с buildAnonymizedText.
+export function buildAnonymizedTextWithMap(
+  sourceText: string,
+  entities: Entity[],
+): { text: string; segments: AnonSegment[] } {
   const repl: { start: number; end: number; placeholder: string }[] = []
   for (const e of entities) {
     if (!e.anonymize) continue
     for (const p of e.positions) repl.push({ start: p.start, end: p.end, placeholder: e.placeholder })
   }
-  repl.sort((a, b) => b.start - a.start)
 
-  const accepted: typeof repl = []
+  // B4: экранируем плейсхолдер-подобные литералы из исходника, чтобы в выводе
+  // они не путались с настоящими плейсхолдерами. Пропускаем те, что перекрывают
+  // активную сущность (маловероятно, но исключаем двойную замену).
+  for (const rng of findPlaceholderRanges(sourceText)) {
+    const overlapsEntity = entities.some(
+      (e) => e.anonymize && e.positions.some((p) => rng.start < p.end && p.start < rng.end),
+    )
+    if (overlapsEntity) continue
+    repl.push({ start: rng.start, end: rng.end, placeholder: escapePlaceholderLiteral(sourceText.slice(rng.start, rng.end)) })
+  }
+
+  // Разрешение пересечений — тот же алгоритм, что в старой buildAnonymizedText
+  // (скан по убыванию start, побеждает уже принятый = с большим start).
+  repl.sort((a, b) => b.start - a.start)
+  const acceptedDesc: typeof repl = []
   let prevStart = Infinity
   let droppedOverlap = false
   for (const r of repl) {
     if (r.end <= prevStart) {
-      accepted.push(r)
+      acceptedDesc.push(r)
       prevStart = r.start
     } else {
       droppedOverlap = true
@@ -28,9 +61,41 @@ export function buildAnonymizedText(sourceText: string, entities: Entity[]): str
     console.warn('buildAnonymizedText: dropped overlapping replacement(s) to avoid double-splicing')
   }
 
-  let out = sourceText
-  for (const r of accepted) out = out.slice(0, r.start) + r.placeholder + out.slice(r.end)
-  return out
+  const accepted = acceptedDesc.slice().sort((a, b) => a.start - b.start)
+  let out = ''
+  let src = 0
+  const segments: AnonSegment[] = []
+  for (const r of accepted) {
+    if (r.start > src) {
+      segments.push({ outStart: out.length, outEnd: out.length + (r.start - src), srcStart: src, srcEnd: r.start, opaque: false })
+      out += sourceText.slice(src, r.start)
+    }
+    segments.push({ outStart: out.length, outEnd: out.length + r.placeholder.length, srcStart: r.start, srcEnd: r.end, opaque: true })
+    out += r.placeholder
+    src = r.end
+  }
+  if (src < sourceText.length) {
+    segments.push({ outStart: out.length, outEnd: out.length + (sourceText.length - src), srcStart: src, srcEnd: sourceText.length, opaque: false })
+    out += sourceText.slice(src)
+  }
+  return { text: out, segments }
+}
+
+// Пересчёт диапазона из анонимизированного текста обратно в исходный. Возвращает
+// null, если диапазон не помещается целиком в один verbatim-сегмент (т.е. задевает
+// плейсхолдер) — такие находки контрольный проход игнорирует.
+export function mapAnonRangeToSource(
+  start: number,
+  end: number,
+  segments: AnonSegment[],
+): { start: number; end: number } | null {
+  for (const s of segments) {
+    if (s.opaque) continue
+    if (start >= s.outStart && end <= s.outEnd) {
+      return { start: s.srcStart + (start - s.outStart), end: s.srcStart + (end - s.outStart) }
+    }
+  }
+  return null
 }
 
 // Current original text of an entity = slice of its first occurrence in the live doc.
@@ -112,6 +177,19 @@ export function changeEntityType(entities: Entity[], id: string, newType: Entity
   const others = entities.filter((e) => e.id !== id)
   const placeholder = `[${newType}_${nextPlaceholderNumber(others, newType)}]`
   return entities.map((e) => (e.id === id ? { ...e, type: newType, placeholder } : e))
+}
+
+// Принять кандидата «серой зоны»: снять флаг candidate, включить анонимизацию и
+// пересчитать плейсхолдер против ПОДТВЕРЖДЁННЫХ (не-кандидатов) сущностей того же
+// типа, чтобы нумерация подтверждённых оставалась плотной. id стабилен.
+export function acceptCandidate(entities: Entity[], id: string): Entity[] {
+  const target = entities.find((e) => e.id === id)
+  if (!target || !target.candidate) return entities
+  const others = entities.filter((e) => e.id !== id && !e.candidate)
+  const placeholder = `[${target.type}_${nextPlaceholderNumber(others, target.type)}]`
+  return entities.map((e) =>
+    e.id === id ? { ...e, candidate: false, candidateNote: undefined, anonymize: true, placeholder } : e,
+  )
 }
 
 // Guard against stale persisted history docs that may contain duplicate ids

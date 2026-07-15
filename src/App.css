@@ -182,6 +182,10 @@
   gap: 8px;
 }
 
+.second-pass-info {
+  margin-top: 6px;
+}
+
 .markdown-preview {
   width: 100%;
   min-height: 420px;
@@ -401,6 +405,13 @@
   opacity: 0.5;
 }
 
+.cm-entity-candidate {
+  background: none !important;
+  text-decoration: underline dashed;
+  text-decoration-color: var(--pico-muted-color);
+  text-underline-offset: 2px;
+}
+
 .cm-entity-tooltip {
   padding: 4px 8px;
   font-size: 12px;
@@ -480,6 +491,35 @@
   color: #e5484d;
 }
 
+.candidates-section {
+  margin-top: 18px;
+}
+
+.candidates-section h3 {
+  margin-bottom: 6px;
+  font-size: 15px;
+}
+
+.candidate-row .entity-accept {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--pico-primary);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+}
+
+.collision-notice {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #b58900;
+  background-color: rgba(181, 137, 0, 0.1);
+  color: #b58900;
+  font-size: 13px;
+}
+
 .anonymized-preview {
   white-space: pre-wrap;
   overflow-x: auto;
@@ -556,3 +596,12 @@
   border: none;
   cursor: pointer;
 }
+
+.export-gate-dialog article { max-width: 30rem; }
+.export-gate-stats { margin: 0 0 1rem; }
+.export-gate-dialog footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.export-gate-dialog footer button { margin: 0; width: auto; }

@@ -3,8 +3,12 @@ import { detectFileKind } from './lib/fileType'
 import { docxToMarkdown } from './lib/docxToMarkdown'
 import { pdfToMarkdown } from './lib/pdfToMarkdown'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
+import { runSecondPass } from './lib/anonymize/secondPass'
+import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, buildAnonymizedText, changeEntityType, dedupeEntityIds } from './lib/anonymize/apply'
+import { addEntityFromSelection, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate } from './lib/anonymize/apply'
+import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
+import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDoc } from './lib/history'
 import ReplacementTable from './components/ReplacementTable'
@@ -61,6 +65,11 @@ function App() {
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
+  const [secondPassRunning, setSecondPassRunning] = useState(false)
+  const [secondPassInfo, setSecondPassInfo] = useState<string | null>(null)
+  const [lastSecondPassAt, setLastSecondPassAt] = useState<number | null>(null)
+  const [exportGate, setExportGate] = useState<(ExportGate & { passAt: number }) | null>(null)
+  const gateDialogRef = useRef<HTMLDialogElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [history, setHistory] = useState<HistoryDoc[]>([])
@@ -130,6 +139,8 @@ function App() {
     setStatus('idle')
     setHasResult(true)
     setHistoryError('')
+    setSecondPassInfo(null)
+    setLastSecondPassAt(null)
   }, [])
 
   const handleDeleteDoc = useCallback((id: string) => {
@@ -179,6 +190,8 @@ function App() {
     setHasResult(false)
     setCurrentDocId(null)
     currentMetaRef.current = null
+    setSecondPassInfo(null)
+    setLastSecondPassAt(null)
 
     try {
       const kind = await detectFileKind(file)
@@ -235,7 +248,36 @@ function App() {
     if (file) void processFile(file)
   }
 
-  const handleExport = () => {
+  const runControlPass = useCallback(async () => {
+    if (!sourceText || secondPassRunning) return 0
+    setSecondPassRunning(true)
+    setSecondPassInfo(null)
+    try {
+      const found = await runSecondPass(sourceText, entities, (p) =>
+        setSecondPassInfo(p.stage === 'load'
+          ? `Контрольная проверка: загрузка модели… ${p.pct ?? 0}%`
+          : `Контрольная проверка: поиск… фрагмент ${p.chunk ?? 0}/${p.chunks ?? 0}`),
+      )
+      const combined = [...entities, ...found]
+      const related = findRelatedOccurrences(sourceText, combined)
+      const newCandidates = [...found, ...related]
+      if (newCandidates.length > 0) setEntities((prev) => [...prev, ...newCandidates])
+      setLastSecondPassAt(Date.now())
+      setSecondPassInfo(
+        newCandidates.length > 0
+          ? `Контрольный проход нашёл кандидатов: ${newCandidates.length}. Проверьте секцию «Проверьте вручную».`
+          : 'Контрольный проход не нашёл пропусков.',
+      )
+      return newCandidates.length
+    } catch {
+      setSecondPassInfo('Не удалось выполнить контрольную проверку.')
+      return 0
+    } finally {
+      setSecondPassRunning(false)
+    }
+  }, [sourceText, entities, secondPassRunning])
+
+  const performMdExport = useCallback(() => {
     const blob = new Blob([anonymizedText], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -244,7 +286,28 @@ function App() {
     a.download = `${base}.md`
     a.click()
     URL.revokeObjectURL(url)
+  }, [anonymizedText, fileName])
+
+  // B5: перед экспортом всегда прогоняем контрольную проверку — если остались
+  // непросмотренные кандидаты «серой зоны», блокируем скачивание мягким подтверждением
+  const handleExport = async () => {
+    const found = await runControlPass()
+    const gate = computeExportGate(entities)
+    const unreviewed = gate.unreviewed + found
+    if (unreviewed > 0) {
+      setExportGate({ replaced: gate.replaced, unreviewed, needsConfirm: true, passAt: Date.now() })
+      return
+    }
+    performMdExport()
   }
+
+  // B5: управляем нативным <dialog> как модалкой (backdrop + Esc) через showModal/close
+  useEffect(() => {
+    const d = gateDialogRef.current
+    if (!d) return
+    if (exportGate && !d.open) d.showModal()
+    if (!exportGate && d.open) d.close()
+  }, [exportGate])
 
   const handleExportCsv = () => {
     const csv = entitiesToCsv(entities, sourceText)
@@ -267,6 +330,14 @@ function App() {
   }, [])
 
   const handleDelete = useCallback((id: string) => {
+    setEntities((prev) => prev.filter((e) => e.id !== id))
+  }, [])
+
+  const handleAcceptCandidate = useCallback((id: string) => {
+    setEntities((prev) => acceptCandidate(prev, id))
+  }, [])
+
+  const handleRejectCandidate = useCallback((id: string) => {
     setEntities((prev) => prev.filter((e) => e.id !== id))
   }, [])
 
@@ -294,6 +365,7 @@ function App() {
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
   const activeCount = entities.filter((e) => e.anonymize).length
+  const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
 
   return (
     <div className="app">
@@ -382,11 +454,14 @@ function App() {
       {status === 'error' && <p className="status error">{error}</p>}
 
       {hasResult && (
-        <section className="result">
+        <section className="result" data-last-pass={lastSecondPassAt ?? undefined}>
           <div className="result-header">
             <h2>Результат</h2>
             <div className="result-actions">
-              <button type="button" onClick={handleExport}>
+              <button type="button" onClick={() => void runControlPass()} disabled={secondPassRunning || isLoading}>
+                {secondPassRunning ? 'Проверка…' : 'Контрольная проверка'}
+              </button>
+              <button type="button" onClick={() => void handleExport()}>
                 Экспортировать .md
               </button>
               {entities.length > 0 && (
@@ -397,10 +472,19 @@ function App() {
             </div>
           </div>
 
+          {secondPassInfo && <p className="status-hint second-pass-info">{secondPassInfo}</p>}
+
           {nerNotice && (
             <p className="ner-notice">
               NER-модель не загрузилась (нужен интернет при первом запуске). Показаны только
               структурные данные (регулярки).
+            </p>
+          )}
+
+          {placeholderCollision && (
+            <p className="collision-notice">
+              Внимание: документ уже содержит текст вида [PERSON_1] — он может путаться с
+              плейсхолдерами анонимизации. В экспортируемом файле такие фрагменты экранируются.
             </p>
           )}
 
@@ -441,6 +525,8 @@ function App() {
                 onChangeType={handleChangeType}
                 onDelete={handleDelete}
                 onSelect={handleSelectEntity}
+                onAcceptCandidate={handleAcceptCandidate}
+                onRejectCandidate={handleRejectCandidate}
               />
             </div>
           ) : (
@@ -455,6 +541,31 @@ function App() {
           )}
         </section>
       )}
+
+      <dialog ref={gateDialogRef} className="export-gate-dialog" onClose={() => setExportGate(null)}>
+        {exportGate && (
+          <article>
+            <h3>Проверьте полноту анонимизации</h3>
+            <p>
+              Остались непросмотренные кандидаты «серой зоны» — они не заменяются автоматически.
+              Просмотрите их в секции «Проверьте вручную» или экспортируйте как есть.
+            </p>
+            <ul className="export-gate-stats">
+              <li>Заменяется сущностей: <b>{exportGate.replaced}</b></li>
+              <li>Кандидатов не просмотрено: <b>{exportGate.unreviewed}</b></li>
+              <li>Контрольный проход: {new Date(exportGate.passAt).toLocaleString('ru-RU')}</li>
+            </ul>
+            <footer>
+              <button type="button" className="secondary" onClick={() => setExportGate(null)}>
+                Вернуться к проверке
+              </button>
+              <button type="button" onClick={() => { performMdExport(); setExportGate(null) }}>
+                Экспортировать всё равно
+              </button>
+            </footer>
+          </article>
+        )}
+      </dialog>
     </div>
   )
 }

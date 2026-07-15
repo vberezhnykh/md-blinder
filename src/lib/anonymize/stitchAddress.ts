@@ -10,7 +10,14 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
   const addr = matches.filter((m) => m.type === 'ADDRESS').sort((a, b) => a.start - b.start)
 
   const merged: RawMatch[] = []
-  let run: { start: number; end: number } | null = null
+  let run: { start: number; end: number; score?: number } | null = null
+
+  // Максимум двух опциональных скоров: undefined побеждает (означает "уверенность
+  // не ограничена сверху" — например структурный матч), иначе берём Math.max.
+  const maxScore = (a: number | undefined, b: number | undefined): number | undefined => {
+    if (a === undefined || b === undefined) return undefined
+    return Math.max(a, b)
+  }
 
   // Стоп-слова, которые чаще всего разделяют ДВЕ РАЗНЫЕ сущности в перечислении
   // ("1 Main St to 2 Oak Ave", "from ... between ... and ..."), а не куски одного
@@ -34,7 +41,13 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
 
   const flush = () => {
     if (run) {
-      merged.push({ type: 'ADDRESS', value: text.slice(run.start, run.end), start: run.start, end: run.end })
+      merged.push({
+        type: 'ADDRESS',
+        value: text.slice(run.start, run.end),
+        start: run.start,
+        end: run.end,
+        score: run.score,
+      })
       run = null
     }
   }
@@ -42,9 +55,10 @@ export function stitchAddressRuns(matches: RawMatch[], text: string): RawMatch[]
   for (const m of addr) {
     if (run && bridgeable(run.end, m.start)) {
       run.end = Math.max(run.end, m.end)
+      run.score = maxScore(run.score, m.score)
     } else {
       flush()
-      run = { start: m.start, end: m.end }
+      run = { start: m.start, end: m.end, score: m.score }
     }
   }
   flush()

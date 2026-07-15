@@ -30,11 +30,10 @@ function buildDecorations(entities: Entity[]): DecorationSet {
   for (const e of entities) {
     for (const p of e.positions) {
       if (p.end <= p.start) continue
-      ranges.push(
-        Decoration.mark({
-          class: `cm-entity cm-entity-${e.type}${e.anonymize ? '' : ' cm-entity-inactive'}`,
-        }).range(p.start, p.end),
-      )
+      const cls = e.candidate
+        ? 'cm-entity cm-entity-candidate'
+        : `cm-entity cm-entity-${e.type}${e.anonymize ? '' : ' cm-entity-inactive'}`
+      ranges.push(Decoration.mark({ class: cls }).range(p.start, p.end))
     }
   }
   ranges.sort((a, b) => a.from - b.from || a.to - b.to)
@@ -132,7 +131,7 @@ function EntityEditor({
               create: () => {
                 const dom = document.createElement('div')
                 dom.className = 'cm-entity-tooltip'
-                dom.textContent = `${e.placeholder} · ${e.type} · ${original}`
+                dom.textContent = `${e.placeholder} · ${e.type}${e.candidate ? ' · кандидат' : ''} · ${original}`
                 return { dom }
               },
             }

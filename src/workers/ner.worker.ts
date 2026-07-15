@@ -134,6 +134,7 @@ self.onmessage = async (e: MessageEvent<InboundMessage>) => {
           value: item.spanText,
           start: chunk.base + item.start,
           end: chunk.base + item.end,
+          score: item.score,
         })
       }
       post({ requestId, type: 'progress', stage: 'detect', chunk: i + 1, chunks: chunks.length })
