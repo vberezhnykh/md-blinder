@@ -246,6 +246,13 @@ function detectAddress(text: string): RawMatch[] {
     if (lineEnd === -1) lineEnd = text.length
     let raw = text.slice(valueStart, lineEnd)
 
+    // Двойная метка ("Address: Address: …", частая при извлечении из таблиц):
+    // пропускаем внешнюю — внутреннюю поймает следующая итерация labelRe, дав
+    // значение, начинающееся с самого адреса (а не со слова "Address"). Без
+    // этого фрагмент "Address: 11 …" стартует раньше многострочного адреса и
+    // блокирует его в resolveOverlaps.
+    if (/^\s*(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+)?address\s*:/i.test(raw)) continue
+
     const cuts: number[] = []
     const fm = fieldRe.exec(raw)
     if (fm) cuts.push(fm.index)
@@ -298,13 +305,33 @@ const US_ADDRESS_RE = new RegExp(
   'g',
 )
 
+// Multi-line variant: PDF/docx extraction often splits a notice-block address
+// across lines — "11 Hurley Street\n\n----------- Cambridge, MA 02141",
+// "1300 Oakside Circle\nChanhassen, MN 55317" — which the single-line regex
+// (its [^,\n] can't cross a newline) misses. Here the street line and the
+// "City, <state> <ZIP>" line are joined across 1–3 line breaks plus any table
+// separator noise (dashes/pipes/underscores). To keep false positives down the
+// street line must contain a street-type suffix, so bare "500 units\n…" lines
+// aren't swallowed. norm() in the harness collapses the separator noise, so the
+// messy span still scores against the clean gold value.
+const US_STREET_SUFFIX =
+  String.raw`(?:street|st|avenue|ave|road|rd|circle|cir|boulevard|blvd|lane|ln|drive|dr|court|ct|place|pl|parkway|pkwy|highway|hwy|square|sq|expressway|row|plaza|terrace|ter|trail|building|bldg|suite|ste|way)`
+const US_ADDRESS_MULTILINE_RE = new RegExp(
+  String.raw`\b\d+[ \t]+[^\n]{0,50}?\b` + US_STREET_SUFFIX +
+    String.raw`\b[^\n]{0,30}?(?:[ \t\-|_*]*\n){1,3}[ \t\-|_*]*[A-Za-z][^,\n]{1,40},[ \t]*(?:` +
+    US_STATE_ALT + String.raw`)[ \t]+\d{5}(?:-\d{4})?\b`,
+  'gi',
+)
+
 function detectUsAddress(text: string): RawMatch[] {
   const matches: RawMatch[] = []
-  US_ADDRESS_RE.lastIndex = 0
-  let m: RegExpExecArray | null
-  while ((m = US_ADDRESS_RE.exec(text))) {
-    const value = m[0].trim()
-    matches.push({ type: 'ADDRESS', value, start: m.index, end: m.index + value.length })
+  for (const re of [US_ADDRESS_RE, US_ADDRESS_MULTILINE_RE]) {
+    re.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text))) {
+      const value = m[0].trim()
+      matches.push({ type: 'ADDRESS', value, start: m.index, end: m.index + value.length })
+    }
   }
   return matches
 }

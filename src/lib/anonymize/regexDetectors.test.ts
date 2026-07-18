@@ -249,6 +249,42 @@ describe('detectStructural', () => {
     expect(detectStructural(text).some((m) => m.type === 'ADDRESS')).toBe(false)
   })
 
+  // C2: multi-line notice-block addresses — street line and "City, ST ZIP" line
+  // split across newlines (and table-separator noise). norm() collapses the
+  // separators, so the messy span still matches the clean gold value.
+  const normAddr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+
+  it('detects a US address split as "street\\nCity, ST ZIP"', () => {
+    const text = 'Notices to:\n1300 Oakside Circle\nChanhassen, MN 55317\n12.8 Fees.'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => normAddr(a.value) === '1300 oakside circle chanhassen mn 55317')).toBe(true)
+  })
+
+  it('detects a US address split across a table-separator row', () => {
+    const text = 'Address:\n11 Hurley Street\n\n--------------------------- Cambridge, MA 02141\nTel'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => normAddr(a.value) === '11 hurley street cambridge ma 02141')).toBe(true)
+  })
+
+  it('detects a US address split by a blank line with a full state name', () => {
+    const text = '2791 Loker Avenue West\n\nCarlsbad, California 92008 Telephone: (619) 438-6611'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => normAddr(a.value) === '2791 loker avenue west carlsbad california 92008')).toBe(true)
+  })
+
+  it('does not multi-line-join a non-street number line into an address', () => {
+    const text = '500 units\nDelivered to Boston, MA 02101 promptly'
+    expect(detectStructural(text).some((m) => m.type === 'ADDRESS')).toBe(false)
+  })
+
+  it('recovers a multi-line address behind a doubled "Address: Address:" label', () => {
+    const text = 'Address: Address: 11 Hurley Street\n\n--------------------------- Cambridge, MA 02141\n\nTel'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    // The full address wins; no truncated "Address: 11 Hurley Street" fragment survives.
+    expect(addrs.some((a) => normAddr(a.value) === '11 hurley street cambridge ma 02141')).toBe(true)
+    expect(addrs.some((a) => /^address/i.test(a.value.trim()))).toBe(false)
+  })
+
   // AUD-2.1: label-anchored contiguous-digit phones.
   it('detects a labeled contiguous-digit phone number ("Tel: ...")', () => {
     const matches = detectStructural('Tel: 0612345678 for support')
