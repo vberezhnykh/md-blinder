@@ -277,6 +277,23 @@ describe('detectStructural', () => {
     expect(detectStructural(text).some((m) => m.type === 'ADDRESS')).toBe(false)
   })
 
+  it('bounds a labeled address at a docx table cell boundary (<br>) and keeps the phone', () => {
+    const text = 'Business address: Avenida Paulista, No. 1912, São Paulo<br>Phone #: 55 11 96074-1591<br>Fernando'
+    const matches = detectStructural(text)
+    const addrs = matches.filter((m) => m.type === 'ADDRESS')
+    // Address stops at the <br>, not swallowing the whole row.
+    expect(addrs.some((a) => a.value === 'Avenida Paulista, No. 1912, São Paulo')).toBe(true)
+    expect(addrs.some((a) => a.value.includes('96074'))).toBe(false)
+    // The phone survives (it is no longer inside the ADDRESS span).
+    expect(matches.some((m) => m.type === 'PHONE' && m.value === '55 11 96074-1591')).toBe(true)
+  })
+
+  it('bounds a labeled address at an underscore signature run', () => {
+    const text = 'Address: 12 Baker Street, London\\_\\_\\_\\_\\_\\_ John Smith'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => a.value === '12 Baker Street, London')).toBe(true)
+  })
+
   it('recovers a multi-line address behind a doubled "Address: Address:" label', () => {
     const text = 'Address: Address: 11 Hurley Street\n\n--------------------------- Cambridge, MA 02141\n\nTel'
     const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')

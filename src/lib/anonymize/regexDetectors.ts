@@ -258,6 +258,12 @@ function detectAddress(text: string): RawMatch[] {
     if (fm) cuts.push(fm.index)
     const cm = contactFieldRe.exec(raw)
     if (cm) cuts.push(cm.index)
+    // Граница ячейки таблицы: docx-таблицы склеивают ряд в одну «строку» через
+    // <br> и |, поэтому без этой обрезки адрес проглатывал бы весь ряд (телефон,
+    // компанию, подпись-подчёркивания) — структурный ADDRESS перебивает PHONE и
+    // др. в resolveOverlaps. Обрезаем по первому <br> / | / ряду подчёркиваний.
+    const bm = /<br\s*\/?>|\||(?:\\?_){3,}/i.exec(raw)
+    if (bm) cuts.push(bm.index)
     if (cuts.length) raw = raw.slice(0, Math.min(...cuts))
 
     const value = raw.trim()
