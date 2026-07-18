@@ -34,6 +34,18 @@ const ROLE_NOUNS = new Set([
   'signatories', 'counterparty', 'company', 'corporation', 'entity',
   'entities', 'individual', 'person', 'persons', 'holder', 'holders',
   'owner', 'owners', 'operator', 'consumer', 'developer',
+  // C2: role/defined terms GLiNER over-tags as PERSON/COMPANY on SEC contracts.
+  'consultant', 'consultants', 'counsel', 'sponsor', 'sponsors', 'promoter',
+  'promoters', 'endorser', 'endorsers', 'appointee', 'appointees', 'addressee',
+  'addressees', 'spokesperson', 'staff', 'personnel', 'force', 'agency',
+  'agencies', 'trustee', 'trustees', 'nominee', 'nominees', 'assignee',
+  'assignor', 'franchisor', 'franchisee', 'payer', 'payee', 'obligor',
+  'obligee', 'indemnitor', 'indemnitee', 'attorney', 'advisor', 'adviser',
+  'auditor', 'accountant', 'broker', 'dealer', 'reseller', 'integrator',
+  // standalone titles (also stripped when leading a name via LEADING_TITLE);
+  // as bare spans they read as roles, not PII.
+  'ceo', 'cfo', 'cto', 'coo', 'chairman', 'chairperson', 'chairwoman',
+  'president', 'secretary', 'treasurer', 'mr', 'mrs', 'ms', 'dr', 'prof',
 ])
 
 const GENERIC_MODIFIERS = new Set([
@@ -44,6 +56,12 @@ const GENERIC_MODIFIERS = new Set([
   'general', 'managing', 'executive', 'senior', 'junior', 'primary',
   'secondary', 'ultimate', 'immediate', 'main', 'registered', 'additional',
   'new', 'existing', 'relevant', 'respective', 'applicable', 'other',
+  // C2: modifiers that combine with role nouns into defined-term FPs
+  // ("Notifying Party", "Agency sales force", "Vice President").
+  'notifying', 'appointing', 'endorsing', 'sponsoring', 'promoting', 'sales',
+  'marketing', 'technical', 'financial', 'legal', 'commercial', 'operational',
+  'administrative', 'corporate', 'vice', 'deputy', 'assistant', 'acting',
+  'interim', 'regional', 'local', 'national', 'international', 'global',
 ])
 
 const CONNECTORS = new Set(['and', 'or', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with'])

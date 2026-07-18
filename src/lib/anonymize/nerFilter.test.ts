@@ -25,6 +25,38 @@ describe('filterGenericNerMatches', () => {
     }
   })
 
+  // C2: role/defined terms the older vocabulary let through as PERSON/COMPANY.
+  it('drops C2 role/defined-term PERSON & COMPANY matches', () => {
+    const dropped: [EntityType, string][] = [
+      ['PERSON', 'Consultant'],
+      ['PERSON', 'CEO'],
+      ['COMPANY', 'Notifying Party'],
+      ['PERSON', 'General Counsel'],
+      ['COMPANY', 'Agency sales force'],
+      ['PERSON', 'the Addressee'],
+      ['PERSON', 'Vice President'],
+      ['PERSON', 'Sponsor'],
+    ]
+    const result = filterGenericNerMatches(dropped.map(([t, v]) => match(t, v)))
+    for (const [, v] of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  it('keeps real names/companies that merely contain a role word', () => {
+    const kept = [
+      match('PERSON', 'John Smith'),
+      match('COMPANY', 'General Motors'),
+      match('COMPANY', 'Creative Agency'),
+      match('COMPANY', 'Acme Consulting'),
+      match('PERSON', 'Sales Director Anna Lee'),
+    ]
+    const result = filterGenericNerMatches(kept)
+    for (const m of kept) {
+      expect(result.some((r) => r.value.includes(m.value.split(' ').pop()!))).toBe(true)
+    }
+  })
+
   it('drops generic ADDRESS matches', () => {
     const dropped = ['registered office address', 'principal place of business']
     const matches = dropped.map((v) => match('ADDRESS', v))

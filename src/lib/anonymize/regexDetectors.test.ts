@@ -176,6 +176,24 @@ describe('detectStructural', () => {
     expect(swifts.some((m) => m.value === 'DEUTDEFF')).toBe(true)
   })
 
+  // C2: 11-letter ALL-CAPS headings whose chars 5–6 form a valid ISO country
+  // code ("IN" = India) must not be flagged as SWIFT without a SWIFT/BIC label.
+  it('does not treat the 11-letter word "APPOINTMENT" as a SWIFT code', () => {
+    const matches = detectStructural('APPOINTMENT OF CONSULTANT')
+    expect(matches.some((m) => m.type === 'SWIFT')).toBe(false)
+  })
+
+  it('does not treat the 11-letter word "TERMINATION" as a SWIFT code', () => {
+    const matches = detectStructural('7. TERMINATION AND SURVIVAL')
+    expect(matches.some((m) => m.type === 'SWIFT')).toBe(false)
+  })
+
+  it('still detects an all-letter 11-char BIC when a SWIFT/BIC label is present', () => {
+    const matches = detectStructural('SWIFT: DEUTDEFFXXX')
+    const swifts = matches.filter((m) => m.type === 'SWIFT')
+    expect(swifts.some((m) => m.value === 'DEUTDEFFXXX')).toBe(true)
+  })
+
   it('detects a labeled country-led address', () => {
     const text = 'Registered office address: Ruritania, Zenda, Central district, Rassendyll st. N 51 b. 121\n'
     const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')

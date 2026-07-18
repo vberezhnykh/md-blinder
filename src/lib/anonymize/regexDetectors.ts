@@ -107,9 +107,14 @@ function detectSwift(text: string): RawMatch[] {
     const code = m[0]
     const country = code.slice(4, 6)
     if (!ISO_COUNTRY_CODES.has(country)) continue
-    const hasBranch = code.length === 11
+    // An all-letter candidate (no digits) that reads as an English word is almost
+    // always a heading, not a BIC — e.g. ALL-CAPS "APPOINTMENT"/"TERMINATION",
+    // whose chars 5–6 ("IN") are a valid ISO country code. Real BICs either carry
+    // digits in the location/branch part or sit next to a SWIFT/BIC label. So
+    // require that label context for ANY all-alpha code (8 OR 11 chars); the old
+    // guard only covered 8-char codes and let 11-letter words through as SWIFT.
     const isAllAlpha = /^[A-Z]+$/.test(code)
-    if (!hasBranch && isAllAlpha) {
+    if (isAllAlpha) {
       const hasContext = /(?:SWIFT|BIC)\b[^A-Za-z0-9]{0,10}$/i.test(text.slice(0, m.index))
       if (!hasContext) continue
     }
