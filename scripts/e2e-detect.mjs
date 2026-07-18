@@ -85,10 +85,13 @@ for (const file of files) {
     })),
   )
 
-  // Read back the app's persisted sourceText from IndexedDB (best-effort).
-  // Give the app's initial putDoc a moment to commit before we look.
+  // Read back the app's persisted sourceText + scored entities from IndexedDB
+  // (best-effort). `scored` carries the per-group NER confidence (structural
+  // matches have score undefined) so an offline threshold sweep (C3) can
+  // reclassify confirmed-vs-candidate without re-running NER. Give the app's
+  // initial putDoc a moment to commit before we look.
   await page.waitForTimeout(500)
-  const sourceText = await page
+  const persisted = await page
     .evaluate(
       () =>
         new Promise((resolve) => {
@@ -104,12 +107,18 @@ for (const file of files) {
                 getAllReq.onerror = () => resolve(null)
                 getAllReq.onsuccess = () => {
                   const records = getAllReq.result || []
-                  if (!records.length) return resolve('')
+                  if (!records.length) return resolve({ sourceText: '', scored: [] })
                   let best = records[0]
                   for (const r of records) {
                     if ((r.updatedAt || 0) > (best.updatedAt || 0)) best = r
                   }
-                  resolve(best.sourceText ?? '')
+                  const scored = (best.entities || []).map((e) => ({
+                    type: e.type,
+                    value: e.value,
+                    score: typeof e.score === 'number' ? e.score : null,
+                    candidate: e.candidate === true,
+                  }))
+                  resolve({ sourceText: best.sourceText ?? '', scored })
                 }
               } catch {
                 resolve(null)
@@ -121,6 +130,8 @@ for (const file of files) {
         }),
     )
     .catch(() => null)
+  const sourceText = persisted?.sourceText ?? null
+  const scored = persisted?.scored ?? []
 
   results[basename(file)] = {
     finished,
@@ -129,6 +140,7 @@ for (const file of files) {
     entities,
     candidates,
     sourceText,
+    scored,
     pageErrors: errors.slice(0, 10),
   }
 
