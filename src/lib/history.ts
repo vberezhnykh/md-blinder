@@ -108,6 +108,7 @@ export function sanitizeEntities(raw: unknown): Entity[] {
     if (typeof e.score === 'number') out.score = e.score
     if (e.candidate === true) out.candidate = true
     if (typeof e.candidateNote === 'string') out.candidateNote = e.candidateNote
+    if (e.dismissed === true) out.dismissed = true
     result.push(out)
   }
   return result

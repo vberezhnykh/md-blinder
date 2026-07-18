@@ -26,8 +26,8 @@ function EntityList({
   onAcceptCandidate,
   onRejectCandidate,
 }: EntityListProps) {
-  const confirmed = entities.filter((e) => !e.candidate)
-  const candidates = entities.filter((e) => e.candidate)
+  const confirmed = entities.filter((e) => !e.candidate && !e.dismissed)
+  const candidates = entities.filter((e) => e.candidate && !e.dismissed)
 
   if (!confirmed.length && !candidates.length) {
     return (

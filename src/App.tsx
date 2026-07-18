@@ -338,7 +338,11 @@ function App() {
   }, [])
 
   const handleRejectCandidate = useCallback((id: string) => {
-    setEntities((prev) => prev.filter((e) => e.id !== id))
+    setEntities((prev) =>
+      prev.map((e) =>
+        e.id === id ? { ...e, dismissed: true, candidate: false, anonymize: false } : e,
+      ),
+    )
   }, [])
 
   const handleAddEntity = useCallback(
