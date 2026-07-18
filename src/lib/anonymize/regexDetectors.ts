@@ -266,6 +266,49 @@ function detectAddress(text: string): RawMatch[] {
   return matches
 }
 
+// C2: US notice-block addresses that carry NO "Address:" label (SEC "If to:" /
+// "Attn:" blocks), which the labeled detector above can't see and GLiNER-small
+// misses. Anchored on the strong tail ", <state> <ZIP5>" (state = validated
+// 2-letter USPS code OR full name) and a leading house number, so the whole
+// span — "3900 Freedom Circle, Suite # 200, Santa Clara, CA 95054" — is caught
+// while the specificity keeps prose false-positives low. Structural, so it wins
+// overlaps against NER fragments in resolveOverlaps. Non-US addresses without a
+// ZIP/state (e.g. Indian/Chinese) are out of scope here — left to NER/gray zone.
+const US_STATE_NAMES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+  'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois',
+  'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland',
+  'Massachusetts', 'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana',
+  'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+  'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon', 'Pennsylvania',
+  'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah',
+  'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+  'District of Columbia',
+]
+const US_STATE_ABBR = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL',
+  'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT',
+  'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI',
+  'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY', 'DC',
+]
+// Full names first so a longer state name wins over a 2-letter prefix.
+const US_STATE_ALT = [...US_STATE_NAMES, ...US_STATE_ABBR].join('|')
+const US_ADDRESS_RE = new RegExp(
+  String.raw`\b\d+\s+[^,\n]+(?:,\s*[^,\n]+){0,7}?,\s*(?:` + US_STATE_ALT + String.raw`)\s+\d{5}(?:-\d{4})?\b`,
+  'g',
+)
+
+function detectUsAddress(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+  US_ADDRESS_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = US_ADDRESS_RE.exec(text))) {
+    const value = m[0].trim()
+    matches.push({ type: 'ADDRESS', value, start: m.index, end: m.index + value.length })
+  }
+  return matches
+}
+
 function detectRegNumber(text: string): RawMatch[] {
   const matches: RawMatch[] = []
   const contextPatterns = [
@@ -308,5 +351,6 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectAccount(text),
     ...detectRegNumber(text),
     ...detectAddress(text),
+    ...detectUsAddress(text),
   ]
 }

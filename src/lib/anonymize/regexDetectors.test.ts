@@ -219,6 +219,36 @@ describe('detectStructural', () => {
     expect(matches.some((m) => m.type === 'ADDRESS')).toBe(false)
   })
 
+  // C2: unlabeled US notice-block addresses (state-abbrev or full-name + ZIP).
+  it('detects an unlabeled US address with a state abbreviation', () => {
+    const text = 'Notices to: 3900 Freedom Circle, Suite # 200, Santa Clara, CA 95054\n'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => a.value === '3900 Freedom Circle, Suite # 200, Santa Clara, CA 95054')).toBe(true)
+  })
+
+  it('detects an unlabeled US address with a full state name', () => {
+    const text = 'If to Sponsor: 2791 Loker Avenue West, Carlsbad, California 92008.'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => a.value === '2791 Loker Avenue West, Carlsbad, California 92008')).toBe(true)
+  })
+
+  it('detects a US address whose city and state are both "New York"', () => {
+    const text = 'Attn: Legal, 22 East 71st Street, New York, New York 10021'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => a.value === '22 East 71st Street, New York, New York 10021')).toBe(true)
+  })
+
+  it('detects a US address with a ZIP+4 code', () => {
+    const text = '11 Hurley Street, Cambridge, MA 02141-1234 end'
+    const addrs = detectStructural(text).filter((m) => m.type === 'ADDRESS')
+    expect(addrs.some((a) => a.value === '11 Hurley Street, Cambridge, MA 02141-1234')).toBe(true)
+  })
+
+  it('does not flag prose numbers as a US address without a state+ZIP tail', () => {
+    const text = 'The Company shall deliver 5000 units, within 30 days of the order.'
+    expect(detectStructural(text).some((m) => m.type === 'ADDRESS')).toBe(false)
+  })
+
   // AUD-2.1: label-anchored contiguous-digit phones.
   it('detects a labeled contiguous-digit phone number ("Tel: ...")', () => {
     const matches = detectStructural('Tel: 0612345678 for support')
