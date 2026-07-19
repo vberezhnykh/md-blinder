@@ -15,18 +15,25 @@
 }
 
 .dropzone {
-  border: 2px dashed var(--pico-muted-border-color);
-  border-radius: 10px;
-  padding: 48px 20px;
+  border: 1.5px dashed var(--line-2);
+  border-radius: var(--radius);
+  padding: 56px 24px;
   text-align: center;
   cursor: pointer;
-  transition: border-color 0.2s, background-color 0.2s;
-  margin-top: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+  margin-top: 28px;
+}
+
+.dropzone:hover {
+  border-color: var(--accent);
 }
 
 .dropzone.dragging {
-  border-color: var(--pico-primary);
-  background-color: var(--pico-primary-focus);
+  border-color: var(--accent);
+  border-style: solid;
+  background-color: var(--accent-wash);
 }
 
 .dropzone.loading {
@@ -49,11 +56,13 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   margin-top: 24px;
   margin-bottom: 16px;
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .compact-bar.dragging {
@@ -94,7 +103,7 @@
   padding: 6px 12px;
   font-size: 13px;
 }
-.history-error { color: #e5484d; font-size: 13px; margin: 8px 0 0; }
+.history-error { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
 .history-row {
   display: flex;
   align-items: center;
@@ -147,7 +156,7 @@
 }
 
 .status.error {
-  color: #e5484d;
+  color: var(--danger);
   white-space: pre-wrap;
 }
 
@@ -195,8 +204,11 @@
   line-height: 1.5;
   padding: 16px;
   box-sizing: border-box;
-  border-radius: 8px;
-  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--ink);
   resize: vertical;
 }
 
@@ -204,9 +216,9 @@
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 6px;
-  border: 1px solid #b58900;
-  background-color: rgba(181, 137, 0, 0.1);
-  color: #b58900;
+  border: 1px solid var(--warn);
+  background-color: var(--warn-wash);
+  color: var(--warn);
   font-size: 13px;
 }
 
@@ -304,12 +316,20 @@
   align-self: flex-start;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  padding: 14px 16px;
 }
 
 .editor-pane .cm-editor {
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   min-height: 420px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 
 .cm-editor.cm-focused {
@@ -331,11 +351,11 @@
   gap: 6px;
   align-items: center;
   max-width: min(360px, calc(100vw - 24px));
-  padding: 4px 6px;
-  background: var(--pico-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  padding: 5px 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
 }
 
 .cm-add-popup select {
@@ -492,9 +512,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--pico-muted-border-color);
+  padding: 6px 6px;
+  margin: 0 -6px;
+  border-radius: var(--radius-xs);
+  border-bottom: 1px solid var(--line);
   font-size: 13px;
+  transition: background-color 0.12s ease;
+}
+
+.entity-row:hover {
+  background: var(--sunk);
 }
 
 .entity-row .cell-placeholder {
@@ -544,7 +571,7 @@
 }
 
 .entity-row .entity-delete:hover {
-  color: #e5484d;
+  color: var(--danger);
 }
 
 .candidates-section {
@@ -570,9 +597,9 @@
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: 6px;
-  border: 1px solid #b58900;
-  background-color: rgba(181, 137, 0, 0.1);
-  color: #b58900;
+  border: 1px solid var(--warn);
+  background-color: var(--warn-wash);
+  color: var(--warn);
   font-size: 13px;
 }
 

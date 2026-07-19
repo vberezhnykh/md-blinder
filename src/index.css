@@ -1,3 +1,80 @@
+/* ─────────────────────────────────────────────────────────────
+   md-blinder design system — tokens + base element styles.
+   Replaces Pico CSS with a bespoke "document / redaction" identity:
+   warm-cool ink neutrals, a deep indigo accent, monospace for the
+   tool's own vocabulary (placeholders, labels, counts).
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light dark;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* neutrals + accent (light) */
+  --paper: #f4f3ee;
+  --surface: #fffffe;
+  --sunk: #eceae2;
+  --ink: #181b22;
+  --ink-2: #474d5a;
+  --ink-3: #7b8291;
+  --line: #e4e1d8;
+  --line-2: #d6d2c7;
+  --accent: #3a3d8f;
+  --accent-2: #4d50a8;
+  --accent-wash: #ecebf6;
+  --accent-ink: #ffffff;
+  --good: #2c7a58;
+  --warn: #a2691a;
+  --warn-wash: #f6eddf;
+  --danger: #b23a45;
+  --danger-wash: #f6e7e8;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 5px;
+  --shadow-sm: 0 1px 2px rgba(24, 27, 34, .04), 0 1px 3px rgba(24, 27, 34, .06);
+  --shadow-pop: 0 10px 30px rgba(24, 27, 34, .16), 0 2px 6px rgba(24, 27, 34, .08);
+
+  /* Pico compatibility aliases — legacy App.css refs resolve to our tokens */
+  --pico-color: var(--ink);
+  --pico-muted-color: var(--ink-3);
+  --pico-muted-border-color: var(--line);
+  --pico-background-color: var(--paper);
+  --pico-card-background-color: var(--surface);
+  --pico-primary: var(--accent);
+  --pico-primary-hover: var(--accent-2);
+  --pico-primary-background: var(--accent);
+  --pico-primary-inverse: var(--accent-ink);
+  --pico-primary-focus: var(--accent-wash);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #101218;
+    --surface: #191c23;
+    --sunk: #23272f;
+    --ink: #ecedf1;
+    --ink-2: #aab0bd;
+    --ink-3: #767d8d;
+    --line: #282c36;
+    --line-2: #353a48;
+    --accent: #9698ea;
+    --accent-2: #abadf1;
+    --accent-wash: #21243b;
+    --accent-ink: #10121a;
+    --good: #5cbf91;
+    --warn: #e0a552;
+    --warn-wash: #2b2415;
+    --danger: #e2818b;
+    --danger-wash: #2e1a1d;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .3), 0 1px 3px rgba(0, 0, 0, .35);
+    --shadow-pop: 0 12px 34px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .4);
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
 #root {
   min-height: 100svh;
   display: flex;
@@ -6,4 +83,97 @@
 
 body {
   margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+/* ── typography ── */
+h1, h2, h3, h4 { margin: 0 0 .4em; font-weight: 700; letter-spacing: -.015em; line-height: 1.2; text-wrap: balance; }
+h1 { font-size: 1.95rem; font-weight: 780; letter-spacing: -.025em; }
+h2 { font-size: 1.35rem; }
+h3 { font-size: 1.02rem; font-weight: 680; }
+p { margin: 0 0 .8em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+small { color: var(--ink-3); }
+code, kbd, samp { font-family: var(--font-mono); }
+::selection { background: var(--accent-wash); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ── buttons ── base is a quiet neutral; accent is reserved for state.
+   Custom app buttons (icon/ghost) override background/border themselves. ── */
+button {
+  font-family: inherit;
+  font-size: .875rem;
+  font-weight: 550;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: .46rem .85rem;
+  cursor: pointer;
+  transition: background .14s ease, border-color .14s ease, color .14s ease, box-shadow .14s ease;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+button:active:not(:disabled) { transform: translateY(.5px); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+
+button.secondary {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
+}
+button.secondary:hover:not(:disabled) { background: var(--sunk); color: var(--ink); border-color: transparent; }
+
+/* ── form controls ── */
+select, input[type="text"], input[type="search"], input:not([type]) {
+  font-family: inherit;
+  font-size: .875rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: .4rem .55rem;
+}
+select { cursor: pointer; }
+select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type="checkbox"] { accent-color: var(--accent); width: 1rem; height: 1rem; cursor: pointer; }
+
+/* ── native <dialog> as a modal card (Pico used to provide this) ── */
+dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--ink);
+  max-width: min(92vw, 34rem);
+}
+dialog::backdrop {
+  background: rgba(16, 18, 24, .5);
+  backdrop-filter: blur(2px);
+}
+dialog article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  padding: 1.4rem 1.5rem;
+  margin: 0;
+}
+dialog h1, dialog h2, dialog h3 { margin-top: 0; }
+
+/* ── scrollbars (subtle, theme-aware) ── */
+* { scrollbar-color: var(--line-2) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-3); background-clip: padding-box; }
