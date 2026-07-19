@@ -7,6 +7,7 @@ import {
   changeEntityType,
   dedupeEntityIds,
   entityCurrentValue,
+  mergeEntities,
   nextPlaceholderNumber,
 } from './apply'
 import { hasPlaceholderCollision } from './placeholderGuard'
@@ -526,6 +527,148 @@ describe('changeEntityType', () => {
     expect(entities).toHaveLength(2)
     const ids = entities.map((e) => e.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('mergeEntities', () => {
+  it('folds the source into the target: target keeps placeholder+value, gains source positions, source is gone, count = union', () => {
+    const sourceText = 'Tripath Technology, Inc. sold assets. Tripath announced the deal.'
+    const tripathIncStart = sourceText.indexOf('Tripath Technology, Inc.')
+    const tripathIncEnd = tripathIncStart + 'Tripath Technology, Inc.'.length
+    const tripathStart = sourceText.indexOf('Tripath announced') // "Tripath" short form
+    const tripathEnd = tripathStart + 'Tripath'.length
+
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Tripath Technology, Inc.',
+      positions: [{ start: tripathIncStart, end: tripathIncEnd }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Tripath',
+      positions: [{ start: tripathStart, end: tripathEnd }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    expect(result.some((e) => e.id === 'source-1')).toBe(false)
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.placeholder).toBe('[COMPANY_1]')
+    expect(merged.value).toBe('Tripath Technology, Inc.')
+    expect(merged.positions).toEqual([
+      { start: tripathIncStart, end: tripathIncEnd },
+      { start: tripathStart, end: tripathEnd },
+    ])
+    expect(merged.positions).toHaveLength(2)
+  })
+
+  it('does not double-add overlapping/duplicate source positions already covered by the target', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }, { start: 20, end: 24 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      // exact duplicate of target's first position, plus an overlapping span
+      positions: [{ start: 0, end: 4 }, { start: 21, end: 25 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.positions).toEqual([{ start: 0, end: 4 }, { start: 20, end: 24 }])
+  })
+
+  it('is a no-op when sourceId === targetId', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }],
+    })
+    const entities = [target]
+
+    const result = mergeEntities(entities, 'target-1', 'target-1')
+
+    expect(result).toBe(entities)
+  })
+
+  it('is a no-op when the source id does not exist', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }],
+    })
+    const entities = [target]
+
+    const result = mergeEntities(entities, 'no-such-id', 'target-1')
+
+    expect(result).toBe(entities)
+  })
+
+  it('is a no-op when the target id does not exist', () => {
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }],
+    })
+    const entities = [source]
+
+    const result = mergeEntities(entities, 'source-1', 'no-such-id')
+
+    expect(result).toBe(entities)
+  })
+
+  it('keeps merged positions sorted by start regardless of insertion order', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 50, end: 54 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }, { start: 25, end: 29 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.positions).toEqual([
+      { start: 0, end: 4 },
+      { start: 25, end: 29 },
+      { start: 50, end: 54 },
+    ])
+  })
+
+  it('preserves order of remaining entities otherwise', () => {
+    const a = makeEntity({ id: 'a', type: 'PERSON', placeholder: '[PERSON_1]', positions: [{ start: 0, end: 1 }] })
+    const target = makeEntity({ id: 'target-1', type: 'COMPANY', placeholder: '[COMPANY_1]', value: 'Acme', positions: [{ start: 10, end: 14 }] })
+    const source = makeEntity({ id: 'source-1', type: 'COMPANY', placeholder: '[COMPANY_2]', value: 'Acme', positions: [{ start: 30, end: 34 }] })
+    const b = makeEntity({ id: 'b', type: 'PERSON', placeholder: '[PERSON_2]', positions: [{ start: 40, end: 41 }] })
+
+    const result = mergeEntities([a, target, source, b], 'source-1', 'target-1')
+
+    expect(result.map((e) => e.id)).toEqual(['a', 'target-1', 'b'])
   })
 })
 

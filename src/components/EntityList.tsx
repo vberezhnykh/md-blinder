@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
@@ -10,10 +11,15 @@ interface EntityListProps {
   onSelect?: (entity: Entity) => void
   onAcceptCandidate?: (id: string) => void
   onRejectCandidate?: (id: string) => void
+  onMergeEntity?: (sourceId: string, targetId: string) => void
 }
 
 function minStart(e: Entity): number {
   return e.positions.length ? Math.min(...e.positions.map((p) => p.start)) : Infinity
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
 }
 
 function EntityList({
@@ -25,7 +31,10 @@ function EntityList({
   onSelect,
   onAcceptCandidate,
   onRejectCandidate,
+  onMergeEntity,
 }: EntityListProps) {
+  const [mergeSource, setMergeSource] = useState<string | null>(null)
+  const [mergeTarget, setMergeTarget] = useState('')
   const confirmed = entities.filter((e) => !e.candidate && !e.dismissed)
   const candidates = entities.filter((e) => e.candidate && !e.dismissed)
 
@@ -45,6 +54,9 @@ function EntityList({
       <h3>Сущности ({confirmed.length})</h3>
       {sorted.map((entity) => {
         const value = entityCurrentValue(sourceText, entity)
+        const sameType = confirmed.filter((e) => e.type === entity.type)
+        const canMerge = sameType.length >= 2 && !!onMergeEntity
+        const isMerging = mergeSource === entity.id
         return (
           <div className="entity-row" key={entity.id}>
             <input
@@ -68,28 +80,92 @@ function EntityList({
             >
               {entity.placeholder}
             </span>
-            <select
-              value={entity.type}
-              onChange={(e) => onChangeType(entity.id, e.target.value as EntityType)}
-            >
-              {ALL_ENTITY_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-            <span className="cell-value" title={value}>
-              {value}
-            </span>
-            <span className="cell-count">{entity.positions.length}</span>
-            <button
-              type="button"
-              className="entity-delete"
-              onClick={() => onDelete(entity.id)}
-              title="Удалить"
-            >
-              ✕
-            </button>
+            {isMerging ? (
+              <div className="entity-merge-edit">
+                <span className="merge-arrow">→</span>
+                <select
+                  className="merge-target"
+                  value={mergeTarget}
+                  onChange={(e) => setMergeTarget(e.target.value)}
+                >
+                  <option value="">объединить с…</option>
+                  {sameType
+                    .filter((t) => t.id !== entity.id)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.placeholder} · {truncate(entityCurrentValue(sourceText, t), 24)}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  className="entity-accept"
+                  title="Объединить"
+                  disabled={!mergeTarget}
+                  onClick={() => {
+                    onMergeEntity?.(entity.id, mergeTarget)
+                    setMergeSource(null)
+                    setMergeTarget('')
+                  }}
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  className="entity-delete"
+                  title="Отмена"
+                  onClick={() => {
+                    setMergeSource(null)
+                    setMergeTarget('')
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <>
+                <select
+                  value={entity.type}
+                  onChange={(e) => onChangeType(entity.id, e.target.value as EntityType)}
+                >
+                  {ALL_ENTITY_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+                <span className="cell-value" title={value}>
+                  {value}
+                </span>
+                <span className="cell-count">{entity.positions.length}</span>
+                {canMerge && (
+                  <button
+                    type="button"
+                    className="entity-merge"
+                    title="Объединить с другой сущностью"
+                    aria-label="Объединить"
+                    onClick={() => {
+                      setMergeSource(entity.id)
+                      setMergeTarget('')
+                    }}
+                  >
+                    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+                      <path d="M3 2v2.5c0 1.9 1.6 3.5 3.5 3.5H13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      <path d="M3 14v-2.5C3 9.6 4.6 8 6.5 8H13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      <path d="M10.5 5.5L13 8l-2.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="entity-delete"
+                  onClick={() => onDelete(entity.id)}
+                  title="Удалить"
+                >
+                  ✕
+                </button>
+              </>
+            )}
           </div>
         )
       })}

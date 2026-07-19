@@ -223,6 +223,30 @@ export function acceptCandidate(entities: Entity[], id: string): Entity[] {
   )
 }
 
+// Fold the source entity's occurrences into the target entity (they become one,
+// sharing the TARGET's placeholder and value). The target keeps its type/value/
+// placeholder/flags; the source is removed. Positions are unioned and sorted,
+// dropping exact-duplicate and overlapping source positions already covered by
+// the target. No-op if ids are equal or either is missing.
+export function mergeEntities(entities: Entity[], sourceId: string, targetId: string): Entity[] {
+  if (sourceId === targetId) return entities
+  const source = entities.find((e) => e.id === sourceId)
+  const target = entities.find((e) => e.id === targetId)
+  if (!source || !target) return entities
+
+  const positions = [...target.positions]
+  for (const p of source.positions) {
+    const overlaps = positions.some((existing) => p.start < existing.end && existing.start < p.end)
+    if (overlaps) continue
+    positions.push(p)
+  }
+  positions.sort((a, b) => a.start - b.start)
+
+  return entities
+    .filter((e) => e.id !== sourceId)
+    .map((e) => (e.id === targetId ? { ...e, positions } : e))
+}
+
 // Guard against stale persisted history docs that may contain duplicate ids
 // (pre-fix bug: id was derived from placeholder). Keeps the first occurrence
 // of each id and assigns a fresh UUID to any later duplicate.

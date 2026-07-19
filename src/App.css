@@ -611,6 +611,40 @@
   color: var(--danger);
 }
 
+.entity-row .entity-merge {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.entity-row .entity-merge:hover {
+  color: var(--accent);
+}
+
+.entity-merge-edit {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.entity-merge-edit .merge-arrow {
+  color: var(--ink-3);
+}
+
+.entity-merge-edit .merge-target {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  font-size: 12px;
+}
+
 .candidates-section {
   margin-top: 18px;
 }

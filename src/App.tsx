@@ -6,7 +6,7 @@ import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { runSecondPass } from './lib/anonymize/secondPass'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import type { Entity, EntityType } from './lib/anonymize/types'
@@ -333,6 +333,10 @@ function App() {
     setEntities((prev) => prev.filter((e) => e.id !== id))
   }, [])
 
+  const handleMergeEntity = useCallback((sourceId: string, targetId: string) => {
+    setEntities((prev) => mergeEntities(prev, sourceId, targetId))
+  }, [])
+
   const handleAcceptCandidate = useCallback((id: string) => {
     setEntities((prev) => acceptCandidate(prev, id))
   }, [])
@@ -541,6 +545,7 @@ function App() {
                 onSelect={handleSelectEntity}
                 onAcceptCandidate={handleAcceptCandidate}
                 onRejectCandidate={handleRejectCandidate}
+                onMergeEntity={handleMergeEntity}
               />
             </div>
           ) : (
