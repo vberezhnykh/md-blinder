@@ -468,19 +468,6 @@ function App() {
         <section className="result" data-last-pass={lastSecondPassAt ?? undefined}>
           <div className="result-header">
             <h2>Результат</h2>
-            <div className="result-actions">
-              <button type="button" onClick={() => void runControlPass()} disabled={secondPassRunning || isLoading}>
-                {secondPassRunning ? 'Проверка…' : 'Контрольная проверка'}
-              </button>
-              <button type="button" onClick={() => void handleExport()}>
-                Экспортировать .md
-              </button>
-              {entities.length > 0 && (
-                <button type="button" onClick={handleExportCsv}>
-                  Экспортировать таблицу (.csv)
-                </button>
-              )}
-            </div>
           </div>
 
           {secondPassInfo && <p className="status-hint second-pass-info">{secondPassInfo}</p>}
@@ -499,24 +486,39 @@ function App() {
             </p>
           )}
 
-          {showViewToggle && (
-            <div className="view-toggle">
-              <button
-                type="button"
-                className={view === 'editor' ? 'active' : ''}
-                onClick={() => setView('editor')}
-              >
-                Редактор
+          <div className="result-toolbar">
+            {showViewToggle && (
+              <div className="view-toggle">
+                <button
+                  type="button"
+                  className={view === 'editor' ? 'active' : ''}
+                  onClick={() => setView('editor')}
+                >
+                  Редактор
+                </button>
+                <button
+                  type="button"
+                  className={view === 'anonymized' ? 'active' : ''}
+                  onClick={() => setView('anonymized')}
+                >
+                  Анонимизированный
+                </button>
+              </div>
+            )}
+            <div className="result-actions">
+              <button type="button" onClick={() => void runControlPass()} disabled={secondPassRunning || isLoading}>
+                {secondPassRunning ? 'Проверка…' : 'Контрольная проверка'}
               </button>
-              <button
-                type="button"
-                className={view === 'anonymized' ? 'active' : ''}
-                onClick={() => setView('anonymized')}
-              >
-                Анонимизированный
+              <button type="button" onClick={() => void handleExport()}>
+                Экспортировать .md
               </button>
+              {entities.length > 0 && (
+                <button type="button" onClick={handleExportCsv}>
+                  Экспортировать таблицу (.csv)
+                </button>
+              )}
             </div>
-          )}
+          </div>
 
           {view === 'editor' ? (
             <div className="editor-layout">

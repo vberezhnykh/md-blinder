@@ -186,9 +186,20 @@
   gap: 12px;
 }
 
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+
 .result-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .second-pass-info {
@@ -224,9 +235,8 @@
 
 .view-toggle {
   display: inline-flex;
-  margin-top: 16px;
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
