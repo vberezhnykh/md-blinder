@@ -535,6 +535,7 @@ function App() {
                 selectedType={selectedType}
                 onSelectedTypeChange={setSelectedType}
                 reveal={reveal}
+                onMergeEntity={handleMergeEntity}
               />
               <EntityList
                 entities={entities}

@@ -422,6 +422,40 @@
   line-height: 1.4;
 }
 
+.cm-merge-popup {
+  position: fixed;
+  z-index: 30;
+  transform: translateY(-100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  padding: 3px;
+  display: flex;
+  align-items: center;
+}
+
+.cm-merge-open {
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  background: var(--accent-wash);
+  color: var(--accent);
+  border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+
+.cm-merge-open:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.cm-merge-select {
+  font-size: 12px;
+  padding: 3px 6px;
+  max-width: 220px;
+}
+
 .cm-entity {
   border-radius: 3px;
   padding: 0 1px;

@@ -16,6 +16,7 @@ interface EntityEditorProps {
   selectedType: EntityType
   onSelectedTypeChange: (t: EntityType) => void
   reveal?: { from: number; to: number; nonce: number } | null
+  onMergeEntity?: (sourceId: string, targetId: string) => void
 }
 
 interface SelectionPopupState {
@@ -28,6 +29,13 @@ interface SelectionPopupState {
 interface ActiveSpan {
   entityId: string
   posIndex: number
+}
+
+interface MergePopupState {
+  entityId: string
+  anchorPos: number
+  left: number
+  top: number
 }
 
 interface EntitiesEffectValue {
@@ -133,6 +141,7 @@ function EntityEditor({
   selectedType,
   onSelectedTypeChange,
   reveal,
+  onMergeEntity,
 }: EntityEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -141,20 +150,26 @@ function EntityEditor({
   const onChangeRef = useRef(onChange)
   const onAddEntityRef = useRef(onAddEntity)
   const onAttachToEntityRef = useRef(onAttachToEntity)
+  const onMergeEntityRef = useRef(onMergeEntity)
   const [hasSelection, setHasSelection] = useState(false)
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
   const selectionPopupRef = useRef<SelectionPopupState | null>(null)
   const [activeSpan, setActiveSpan] = useState<ActiveSpan | null>(null)
   const activeSpanRef = useRef<ActiveSpan | null>(null)
   const [attachTarget, setAttachTarget] = useState('')
+  const [mergePopup, setMergePopup] = useState<MergePopupState | null>(null)
+  const mergePopupRef = useRef<MergePopupState | null>(null)
+  const [mergePickerOpen, setMergePickerOpen] = useState(false)
 
   entitiesRef.current = entities
   valueRef.current = value
   onChangeRef.current = onChange
   onAddEntityRef.current = onAddEntity
   onAttachToEntityRef.current = onAttachToEntity
+  onMergeEntityRef.current = onMergeEntity
   selectionPopupRef.current = selectionPopup
   activeSpanRef.current = activeSpan
+  mergePopupRef.current = mergePopup
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -177,6 +192,31 @@ function EntityEditor({
             }
           }
           setActiveSpan(next)
+
+          if (next === null) {
+            setMergePopup(null)
+            setMergePickerOpen(false)
+          } else {
+            const e = entitiesRef.current.find((x) => x.id === next.entityId)
+            const p = e?.positions[next.posIndex]
+            const mergeable =
+              e != null &&
+              !e.candidate &&
+              !e.dismissed &&
+              entitiesRef.current.filter((x) => !x.candidate && !x.dismissed && x.type === e.type).length >= 2
+            if (mergeable && e && p) {
+              const coords = update.view.coordsAtPos(p.start)
+              if (coords) {
+                setMergePopup({ entityId: e.id, anchorPos: p.start, left: coords.left, top: coords.top - 34 })
+                setMergePickerOpen(false)
+              } else {
+                setMergePopup(null)
+              }
+            } else {
+              setMergePopup(null)
+              setMergePickerOpen(false)
+            }
+          }
         } else {
           const coords = update.view.coordsAtPos(sel.to)
           setSelectionPopup(
@@ -184,6 +224,8 @@ function EntityEditor({
           )
           setAttachTarget('')
           setActiveSpan(null)
+          setMergePopup(null)
+          setMergePickerOpen(false)
         }
       }
       if (!update.docChanged) return
@@ -303,13 +345,24 @@ function EntityEditor({
 
     const handleScroll = () => {
       const current = selectionPopupRef.current
-      if (!current) return
-      const coords = view.coordsAtPos(current.to)
-      if (!coords) {
-        setSelectionPopup(null)
-        return
+      if (current) {
+        const coords = view.coordsAtPos(current.to)
+        if (!coords) {
+          setSelectionPopup(null)
+        } else {
+          setSelectionPopup({ ...current, left: coords.left, top: coords.bottom + 6 })
+        }
       }
-      setSelectionPopup({ ...current, left: coords.left, top: coords.bottom + 6 })
+
+      const currentMerge = mergePopupRef.current
+      if (currentMerge) {
+        const c = view.coordsAtPos(currentMerge.anchorPos)
+        if (!c) {
+          setMergePopup(null)
+        } else {
+          setMergePopup({ ...currentMerge, left: c.left, top: c.top - 34 })
+        }
+      }
     }
     window.addEventListener('scroll', handleScroll, { passive: true, capture: true })
 
@@ -369,6 +422,8 @@ function EntityEditor({
   const truncateValue = (v: string, max = 30): string =>
     v.length > max ? `${v.slice(0, max)}…` : v
 
+  const activeMergeType = mergePopup ? entities.find((x) => x.id === mergePopup.entityId)?.type : undefined
+
   return (
     <div className="editor-pane">
       <div className="editor-toolbar">
@@ -427,6 +482,43 @@ function EntityEditor({
             <button type="button" onClick={handleAddFromPopup}>
               ＋
             </button>
+          </div>,
+          document.body,
+        )}
+      {mergePopup &&
+        createPortal(
+          <div
+            className="cm-merge-popup"
+            style={{ left: mergePopup.left, top: mergePopup.top }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            {!mergePickerOpen ? (
+              <button type="button" className="cm-merge-open" onClick={() => setMergePickerOpen(true)}>
+                ↦ Объединить
+              </button>
+            ) : (
+              <select
+                className="cm-merge-select"
+                defaultValue=""
+                onMouseDown={(e) => e.stopPropagation()}
+                onChange={(e) => {
+                  const targetId = e.target.value
+                  if (targetId) onMergeEntityRef.current?.(mergePopup.entityId, targetId)
+                  setMergePopup(null)
+                  setMergePickerOpen(false)
+                  setActiveSpan(null)
+                }}
+              >
+                <option value="">объединить с…</option>
+                {entities
+                  .filter((x) => x.type === activeMergeType && !x.candidate && !x.dismissed && x.id !== mergePopup.entityId)
+                  .map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.placeholder} · {truncateValue(x.value, 22)}
+                    </option>
+                  ))}
+              </select>
+            )}
           </div>,
           document.body,
         )}
