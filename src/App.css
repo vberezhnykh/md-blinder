@@ -412,6 +412,48 @@
   text-underline-offset: 2px;
 }
 
+.cm-entity-active {
+  outline: 1.5px solid var(--pico-primary, #2a78d6);
+  outline-offset: -1px;
+  border-radius: 3px;
+}
+
+.cm-entity-handle {
+  display: inline-block;
+  position: relative;
+  width: 10px;
+  height: 10px;
+  vertical-align: middle;
+  cursor: ew-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.cm-entity-handle::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pico-primary, #2a78d6);
+  border: 1.5px solid var(--pico-background-color, #fff);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  transform: translateY(-50%);
+}
+
+.cm-entity-handle-left::before {
+  left: -6px;
+}
+
+.cm-entity-handle-right::before {
+  right: -6px;
+}
+
+.cm-entity-handle:hover::before {
+  transform: translateY(-50%) scale(1.15);
+}
+
 .cm-entity-tooltip {
   padding: 4px 8px;
   font-size: 12px;

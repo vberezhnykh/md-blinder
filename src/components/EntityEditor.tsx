@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
-import { Decoration, type DecorationSet, hoverTooltip } from '@codemirror/view'
+import { Decoration, type DecorationSet, hoverTooltip, WidgetType } from '@codemirror/view'
 import { StateEffect, StateField } from '@codemirror/state'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
+import { snapToWordBoundary } from '../lib/wordSnap'
 
 interface EntityEditorProps {
   value: string
@@ -23,20 +24,77 @@ interface SelectionPopupState {
   top: number
 }
 
-const setEntitiesEffect = StateEffect.define<Entity[]>()
+interface ActiveSpan {
+  entityId: string
+  posIndex: number
+}
 
-function buildDecorations(entities: Entity[]): DecorationSet {
+interface EntitiesEffectValue {
+  entities: Entity[]
+  active: ActiveSpan | null
+}
+
+const setEntitiesEffect = StateEffect.define<EntitiesEffectValue>()
+
+class EntityHandleWidget extends WidgetType {
+  side: 'left' | 'right'
+  pos: number
+  constructor(side: 'left' | 'right', pos: number) {
+    super()
+    this.side = side
+    this.pos = pos
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement('span')
+    span.className = `cm-entity-handle cm-entity-handle-${this.side}`
+    span.setAttribute('data-side', this.side)
+    return span
+  }
+  eq(other: EntityHandleWidget): boolean {
+    return other.side === this.side && other.pos === this.pos
+  }
+  ignoreEvent(): boolean {
+    return false
+  }
+}
+
+function buildDecorations(entities: Entity[], active: ActiveSpan | null): DecorationSet {
   const ranges = []
+  let activePos: { start: number; end: number } | null = null
+  if (active) {
+    const e = entities.find((it) => it.id === active.entityId)
+    const p = e?.positions[active.posIndex]
+    if (p && p.end > p.start) activePos = p
+  }
+
   for (const e of entities) {
-    for (const p of e.positions) {
-      if (p.end <= p.start) continue
+    e.positions.forEach((p, i) => {
+      if (p.end <= p.start) return
+      const isActive = activePos !== null && e.id === active?.entityId && i === active?.posIndex
       const cls = e.candidate
         ? 'cm-entity cm-entity-candidate'
         : `cm-entity cm-entity-${e.type}${e.anonymize ? '' : ' cm-entity-inactive'}`
-      ranges.push(Decoration.mark({ class: cls }).range(p.start, p.end))
-    }
+      ranges.push(Decoration.mark({ class: isActive ? `${cls} cm-entity-active` : cls }).range(p.start, p.end))
+    })
   }
-  ranges.sort((a, b) => a.from - b.from || a.to - b.to)
+
+  if (activePos) {
+    ranges.push(
+      Decoration.widget({ widget: new EntityHandleWidget('left', activePos.start), side: -1 }).range(
+        activePos.start,
+      ),
+    )
+    ranges.push(
+      Decoration.widget({ widget: new EntityHandleWidget('right', activePos.end), side: 1 }).range(
+        activePos.end,
+      ),
+    )
+  }
+
+  // Ranges are a mix of marks and zero-length widgets at the same offsets as
+  // mark boundaries; let CodeMirror sort them (it orders by `from`, then by
+  // each decoration's startSide — our left handle has side -1 so it sorts
+  // before a mark starting at the same position, matching the spec).
   return Decoration.set(ranges, true)
 }
 
@@ -44,7 +102,8 @@ const entityDecorationField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(deco, tr) {
     deco = deco.map(tr.changes)
-    for (const eff of tr.effects) if (eff.is(setEntitiesEffect)) deco = buildDecorations(eff.value)
+    for (const eff of tr.effects)
+      if (eff.is(setEntitiesEffect)) deco = buildDecorations(eff.value.entities, eff.value.active)
     return deco
   },
   provide: (f) => EditorView.decorations.from(f),
@@ -82,12 +141,15 @@ function EntityEditor({
   const [hasSelection, setHasSelection] = useState(false)
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
   const selectionPopupRef = useRef<SelectionPopupState | null>(null)
+  const [activeSpan, setActiveSpan] = useState<ActiveSpan | null>(null)
+  const activeSpanRef = useRef<ActiveSpan | null>(null)
 
   entitiesRef.current = entities
   valueRef.current = value
   onChangeRef.current = onChange
   onAddEntityRef.current = onAddEntity
   selectionPopupRef.current = selectionPopup
+  activeSpanRef.current = activeSpan
 
   useEffect(() => {
     if (!mountRef.current) return
@@ -98,11 +160,24 @@ function EntityEditor({
         setHasSelection(!sel.empty)
         if (sel.empty) {
           setSelectionPopup(null)
+          const head = sel.head
+          let next: ActiveSpan | null = null
+          find: for (const e of entitiesRef.current) {
+            for (let i = 0; i < e.positions.length; i++) {
+              const p = e.positions[i]
+              if (head >= p.start && head <= p.end) {
+                next = { entityId: e.id, posIndex: i }
+                break find
+              }
+            }
+          }
+          setActiveSpan(next)
         } else {
           const coords = update.view.coordsAtPos(sel.to)
           setSelectionPopup(
             coords ? { from: sel.from, to: sel.to, left: coords.left, top: coords.bottom + 6 } : null,
           )
+          setActiveSpan(null)
         }
       }
       if (!update.docChanged) return
@@ -141,6 +216,68 @@ function EntityEditor({
       return null
     })
 
+    const dragHandlers = EditorView.domEventHandlers({
+      mousedown(event, view) {
+        const target = event.target as HTMLElement | null
+        const handleEl = target?.closest('.cm-entity-handle') as HTMLElement | null
+        if (!handleEl) return false
+        const side = handleEl.getAttribute('data-side')
+        if (side !== 'left' && side !== 'right') return false
+        const active = activeSpanRef.current
+        if (!active) return false
+        const entity = entitiesRef.current.find((e) => e.id === active.entityId)
+        const startPos = entity?.positions[active.posIndex]
+        if (!startPos) return false
+
+        event.preventDefault()
+
+        const fixedStart = startPos.start
+        const fixedEnd = startPos.end
+        let rafId: number | null = null
+        let pendingEvent: MouseEvent | null = null
+
+        const applyMove = () => {
+          rafId = null
+          const e = pendingEvent
+          if (!e) return
+          pendingEvent = null
+          const pos = view.posAtCoords({ x: e.clientX, y: e.clientY })
+          if (pos == null) return
+          const snapped = snapToWordBoundary(view.state.doc.toString(), pos)
+          const docLen = view.state.doc.length
+
+          let nextPos: { start: number; end: number }
+          if (side === 'left') {
+            const newStart = Math.max(0, Math.min(snapped, fixedEnd - 1))
+            nextPos = { start: newStart, end: fixedEnd }
+          } else {
+            const newEnd = Math.min(docLen, Math.max(snapped, fixedStart + 1))
+            nextPos = { start: fixedStart, end: newEnd }
+          }
+
+          const nextEntities = entitiesRef.current.map((en) => {
+            if (en.id !== active.entityId) return en
+            const positions = en.positions.map((p, i) => (i === active.posIndex ? nextPos : p))
+            return { ...en, positions }
+          })
+          onChangeRef.current(view.state.doc.toString(), nextEntities)
+        }
+
+        const onMouseMove = (e: MouseEvent) => {
+          pendingEvent = e
+          if (rafId == null) rafId = requestAnimationFrame(applyMove)
+        }
+        const onMouseUp = () => {
+          window.removeEventListener('mousemove', onMouseMove)
+          window.removeEventListener('mouseup', onMouseUp)
+          if (rafId != null) cancelAnimationFrame(rafId)
+        }
+        window.addEventListener('mousemove', onMouseMove)
+        window.addEventListener('mouseup', onMouseUp)
+        return true
+      },
+    })
+
     const view = new EditorView({
       doc: valueRef.current,
       parent: mountRef.current,
@@ -150,12 +287,13 @@ function EntityEditor({
         EditorView.lineWrapping,
         entityDecorationField,
         tooltip,
+        dragHandlers,
         updateListener,
         editorTheme,
       ],
     })
     viewRef.current = view
-    view.dispatch({ effects: setEntitiesEffect.of(entitiesRef.current) })
+    view.dispatch({ effects: setEntitiesEffect.of({ entities: entitiesRef.current, active: activeSpanRef.current }) })
 
     const handleScroll = () => {
       const current = selectionPopupRef.current
@@ -180,8 +318,8 @@ function EntityEditor({
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    view.dispatch({ effects: setEntitiesEffect.of(entities) })
-  }, [entities])
+    view.dispatch({ effects: setEntitiesEffect.of({ entities, active: activeSpan }) })
+  }, [entities, activeSpan])
 
   useEffect(() => {
     const view = viewRef.current
