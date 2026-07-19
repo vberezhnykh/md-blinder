@@ -1,5 +1,5 @@
 .app {
-  max-width: 1180px;
+  max-width: 1360px;
   margin: 0 auto;
   padding: 32px 20px 64px;
   text-align: left;
@@ -297,24 +297,35 @@
   align-items: flex-start;
 }
 
-@media (max-width: 900px) {
-  .editor-layout {
-    flex-direction: column;
-  }
+/* Editor gets the lion's share of the width; the entity pane is a fixed,
+   narrower column. Both panes stick to the top and cap at the viewport height,
+   scrolling internally, so neither runs off-screen or bloats the page. */
+.editor-pane {
+  flex: 1 1 0;
+  min-width: 0;
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 24px);
 }
 
-.editor-pane {
-  flex: 2 1 0;
-  min-width: 0;
+/* the CodeMirror mount wrapper (the unclassed div between toolbar and editor) */
+.editor-pane > div:not(.editor-toolbar) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .entity-pane {
-  flex: 1 1 320px;
-  min-width: 260px;
+  flex: 0 0 400px;
+  min-width: 0;
   position: sticky;
-  top: 8px;
+  top: 12px;
   align-self: flex-start;
-  max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 24px);
   overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -323,10 +334,26 @@
   padding: 14px 16px;
 }
 
+@media (max-width: 900px) {
+  .editor-layout {
+    flex-direction: column;
+  }
+  .editor-pane,
+  .entity-pane {
+    position: static;
+    max-height: none;
+    flex: 1 1 auto;
+  }
+  .editor-pane .cm-editor {
+    min-height: 360px;
+  }
+}
+
 .editor-pane .cm-editor {
+  flex: 1 1 auto;
+  min-height: 220px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  min-height: 420px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -542,7 +569,7 @@
 
 .entity-row select {
   flex: 0 0 auto;
-  max-width: 120px;
+  max-width: 108px;
   font-size: 12px;
 }
 
