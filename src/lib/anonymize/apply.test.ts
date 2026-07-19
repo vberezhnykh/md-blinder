@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   acceptCandidate,
   addEntityFromSelection,
+  addOccurrenceToEntity,
   buildAnonymizedText,
   changeEntityType,
   dedupeEntityIds,
@@ -320,6 +321,160 @@ describe('addEntityFromSelection', () => {
     expect(result[0].placeholder).toBe('[COMPANY_1]')
     expect(result[0].id).not.toBe(result[0].placeholder)
     expect(result[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+  })
+})
+
+describe('addOccurrenceToEntity', () => {
+  it('attaches a span to the target entity, sharing its placeholder', () => {
+    const sourceText = 'Acme Ltd works with Acme Corp'
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: 0, end: 8 }],
+    })
+    const acmeCorpStart = sourceText.indexOf('Acme Corp')
+    const acmeCorpEnd = acmeCorpStart + 'Acme Corp'.length
+
+    const result = addOccurrenceToEntity([target], sourceText, acmeCorpStart, acmeCorpEnd, 'target-1')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].placeholder).toBe('[COMPANY_1]')
+    expect(result[0].positions).toEqual([
+      { start: 0, end: 8 },
+      { start: acmeCorpStart, end: acmeCorpEnd },
+    ])
+  })
+
+  it('removes the span from another entity that overlapped it', () => {
+    const sourceText = 'Baker Street here, Baker Street there'
+    const secondStart = sourceText.indexOf('Baker Street', 1)
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'ADDRESS',
+      placeholder: '[ADDRESS_1]',
+      value: 'existing target span',
+      positions: [{ start: 34, end: 39 }], // "there"
+    })
+    const other = makeEntity({
+      id: 'other-1',
+      type: 'ADDRESS',
+      placeholder: '[ADDRESS_2]',
+      value: 'Baker Street',
+      positions: [
+        { start: 0, end: 12 },
+        { start: secondStart, end: secondStart + 'Baker Street'.length },
+      ],
+    })
+
+    const result = addOccurrenceToEntity([target, other], sourceText, 0, 12, 'target-1')
+
+    const survivingOther = result.find((e) => e.id === 'other-1')
+    expect(survivingOther).toBeDefined()
+    expect(survivingOther?.positions).toEqual([
+      { start: secondStart, end: secondStart + 'Baker Street'.length },
+    ])
+
+    const survivingTarget = result.find((e) => e.id === 'target-1')
+    expect(survivingTarget?.positions).toEqual([
+      { start: 0, end: 12 },
+      { start: 34, end: 39 },
+    ])
+  })
+
+  it('drops an other entity left with zero positions after absorption', () => {
+    const sourceText = 'Acme Ltd and Acme Ltd again'
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: 100, end: 108 }],
+    })
+    const other = makeEntity({
+      id: 'other-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme Ltd',
+      positions: [{ start: 0, end: 8 }],
+    })
+
+    const result = addOccurrenceToEntity([target, other], sourceText, 0, 8, 'target-1')
+
+    expect(result.some((e) => e.id === 'other-1')).toBe(false)
+    const survivingTarget = result.find((e) => e.id === 'target-1')
+    expect(survivingTarget?.positions).toEqual([
+      { start: 0, end: 8 },
+      { start: 100, end: 108 },
+    ])
+  })
+
+  it('is a no-op when the span already overlaps one of the target positions', () => {
+    const sourceText = 'Acme Ltd works with Acme Corp'
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: 0, end: 8 }],
+    })
+
+    const result = addOccurrenceToEntity([target], sourceText, 0, 8, 'target-1')
+
+    expect(result[0].positions).toEqual([{ start: 0, end: 8 }])
+  })
+
+  it('is a no-op when the entityId does not exist', () => {
+    const sourceText = 'Acme Ltd works with Acme Corp'
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: 0, end: 8 }],
+    })
+    const entities = [target]
+
+    const result = addOccurrenceToEntity(entities, sourceText, 21, 30, 'no-such-id')
+
+    expect(result).toBe(entities)
+  })
+
+  it('is a no-op when to <= from', () => {
+    const sourceText = 'Acme Ltd works with Acme Corp'
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: 0, end: 8 }],
+    })
+    const entities = [target]
+
+    const result = addOccurrenceToEntity(entities, sourceText, 10, 10, 'target-1')
+
+    expect(result).toBe(entities)
+  })
+
+  it('keeps the target positions sorted by start after attaching an earlier span', () => {
+    const sourceText = 'Acme Corp works with Acme Ltd'
+    const acmeLtdStart = sourceText.indexOf('Acme Ltd')
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme Ltd',
+      positions: [{ start: acmeLtdStart, end: acmeLtdStart + 'Acme Ltd'.length }],
+    })
+
+    const result = addOccurrenceToEntity([target], sourceText, 0, 9, 'target-1')
+
+    const survivingTarget = result.find((e) => e.id === 'target-1')
+    expect(survivingTarget?.positions).toEqual([
+      { start: 0, end: 9 },
+      { start: acmeLtdStart, end: acmeLtdStart + 'Acme Ltd'.length },
+    ])
   })
 })
 

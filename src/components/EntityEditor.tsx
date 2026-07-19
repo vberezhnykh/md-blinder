@@ -12,6 +12,7 @@ interface EntityEditorProps {
   entities: Entity[]
   onChange: (nextText: string, nextEntities: Entity[]) => void
   onAddEntity: (from: number, to: number) => void
+  onAttachToEntity: (from: number, to: number, entityId: string) => void
   selectedType: EntityType
   onSelectedTypeChange: (t: EntityType) => void
   reveal?: { from: number; to: number; nonce: number } | null
@@ -128,6 +129,7 @@ function EntityEditor({
   entities,
   onChange,
   onAddEntity,
+  onAttachToEntity,
   selectedType,
   onSelectedTypeChange,
   reveal,
@@ -138,16 +140,19 @@ function EntityEditor({
   const valueRef = useRef(value)
   const onChangeRef = useRef(onChange)
   const onAddEntityRef = useRef(onAddEntity)
+  const onAttachToEntityRef = useRef(onAttachToEntity)
   const [hasSelection, setHasSelection] = useState(false)
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
   const selectionPopupRef = useRef<SelectionPopupState | null>(null)
   const [activeSpan, setActiveSpan] = useState<ActiveSpan | null>(null)
   const activeSpanRef = useRef<ActiveSpan | null>(null)
+  const [attachTarget, setAttachTarget] = useState('')
 
   entitiesRef.current = entities
   valueRef.current = value
   onChangeRef.current = onChange
   onAddEntityRef.current = onAddEntity
+  onAttachToEntityRef.current = onAttachToEntity
   selectionPopupRef.current = selectionPopup
   activeSpanRef.current = activeSpan
 
@@ -177,6 +182,7 @@ function EntityEditor({
           setSelectionPopup(
             coords ? { from: sel.from, to: sel.to, left: coords.left, top: coords.bottom + 6 } : null,
           )
+          setAttachTarget('')
           setActiveSpan(null)
         }
       }
@@ -351,9 +357,17 @@ function EntityEditor({
 
   const handleAddFromPopup = () => {
     if (!selectionPopup) return
-    onAddEntityRef.current(selectionPopup.from, selectionPopup.to)
+    if (attachTarget === '') {
+      onAddEntityRef.current(selectionPopup.from, selectionPopup.to)
+    } else {
+      onAttachToEntityRef.current(selectionPopup.from, selectionPopup.to, attachTarget)
+    }
     setSelectionPopup(null)
+    setAttachTarget('')
   }
+
+  const truncateValue = (v: string, max = 30): string =>
+    v.length > max ? `${v.slice(0, max)}…` : v
 
   return (
     <div className="editor-pane">
@@ -382,7 +396,11 @@ function EntityEditor({
           >
             <select
               value={selectedType}
-              onChange={(e) => onSelectedTypeChange(e.target.value as EntityType)}
+              disabled={attachTarget !== ''}
+              onChange={(e) => {
+                onSelectedTypeChange(e.target.value as EntityType)
+                setAttachTarget('')
+              }}
               onMouseDown={(e) => e.stopPropagation()}
             >
               {ALL_ENTITY_TYPES.map((t) => (
@@ -390,6 +408,21 @@ function EntityEditor({
                   {t}
                 </option>
               ))}
+            </select>
+            <select
+              className="cm-add-popup-target"
+              value={attachTarget}
+              onChange={(e) => setAttachTarget(e.target.value)}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <option value="">— новая сущность —</option>
+              {entities
+                .filter((e) => e.type === selectedType && !e.candidate)
+                .map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.placeholder} · {truncateValue(e.value)}
+                  </option>
+                ))}
             </select>
             <button type="button" onClick={handleAddFromPopup}>
               ＋

@@ -169,6 +169,37 @@ export function addEntityFromSelection(
   return [...working, newEntity]
 }
 
+// Attach one occurrence [from,to] to an EXISTING entity (by id) so it shares that
+// entity's placeholder, instead of creating a new entity. The span is absorbed
+// away from any OTHER entity that overlaps it (so it isn't redacted twice), then
+// added to the target's positions unless it already overlaps one of them.
+export function addOccurrenceToEntity(
+  entities: Entity[],
+  _sourceText: string,
+  from: number,
+  to: number,
+  entityId: string,
+): Entity[] {
+  if (to <= from) return entities
+  if (!entities.some((e) => e.id === entityId)) return entities
+
+  const working = entities
+    .map((e) => {
+      if (e.id === entityId) return e
+      const positions = e.positions.filter((p) => !(from < p.end && p.start < to))
+      return { ...e, positions }
+    })
+    .filter((e) => e.id === entityId || e.positions.length > 0)
+
+  return working.map((e) => {
+    if (e.id !== entityId) return e
+    const overlapsExisting = e.positions.some((p) => from < p.end && p.start < to)
+    if (overlapsExisting) return e
+    const positions = [...e.positions, { start: from, end: to }].sort((a, b) => a.start - b.start)
+    return { ...e, positions }
+  })
+}
+
 // Recolor an entity to a new type, recomputing its placeholder against the
 // OTHER entities (so it never collides with an existing placeholder of the
 // new type). The entity's `id` is stable and never changes here.

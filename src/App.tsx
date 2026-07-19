@@ -6,7 +6,7 @@ import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { runSecondPass } from './lib/anonymize/secondPass'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import type { Entity, EntityType } from './lib/anonymize/types'
@@ -352,6 +352,13 @@ function App() {
     [sourceText, selectedType],
   )
 
+  const handleAttachToEntity = useCallback(
+    (from: number, to: number, entityId: string) => {
+      setEntities((prev) => addOccurrenceToEntity(prev, sourceText, from, to, entityId))
+    },
+    [sourceText],
+  )
+
   const handleEditorChange = useCallback((nextText: string, nextEntities: Entity[]) => {
     setSourceText(nextText)
     setEntities(nextEntities)
@@ -518,6 +525,7 @@ function App() {
                 entities={entities}
                 onChange={handleEditorChange}
                 onAddEntity={handleAddEntity}
+                onAttachToEntity={handleAttachToEntity}
                 selectedType={selectedType}
                 onSelectedTypeChange={setSelectedType}
                 reveal={reveal}
