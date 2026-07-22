@@ -258,6 +258,58 @@ export function mergeEntities(entities: Entity[], sourceId: string, targetId: st
     .map((e) => (e.id === targetId ? { ...e, positions, anonymize: target.anonymize || source.anonymize } : e))
 }
 
+// Схлопывает дыры в нумерации плейсхолдеров, остающиеся после удаления/слияния
+// сущностей (напр. PERSON_1, PERSON_4 → PERSON_1, PERSON_2). Перенумерация идёт
+// потипно и раздельно по двум группам: сначала подтверждённые (не кандидат и не
+// отклонены), затем кандидаты/отклонённые — так сохраняется инвариант "номер
+// кандидата всегда больше номеров подтверждённых сущностей того же типа" (см.
+// комментарий в index.ts перед confirmedGroups/candidateGroups), и acceptCandidate
+// не может словить коллизию. Внутри каждой группы относительный порядок по
+// текущему номеру плейсхолдера сохраняется; сущности без разбираемого номера
+// уходят в конец своей группы, сохраняя взаимный порядок. Порядок элементов в
+// возвращаемом массиве не меняется — правится только поле placeholder. Возвращает
+// тот же массив (===), если ни один плейсхолдер не поменялся, чтобы не плодить
+// лишние ре-рендеры.
+export function compactPlaceholderNumbers(entities: Entity[]): Entity[] {
+  const parseNum = (placeholder: string): number | null => {
+    const m = placeholder.match(/_(\d+)\]$/)
+    return m ? Number(m[1]) : null
+  }
+
+  // Стабильно сортирует группу по разобранному номеру; сущности без номера — в конец.
+  const sortByNumber = (group: Entity[]): Entity[] =>
+    group
+      .map((e, idx) => ({ e, idx, num: parseNum(e.placeholder) }))
+      .sort((a, b) => {
+        if (a.num === null && b.num === null) return a.idx - b.idx
+        if (a.num === null) return 1
+        if (b.num === null) return -1
+        return a.num - b.num || a.idx - b.idx
+      })
+      .map((x) => x.e)
+
+  const newPlaceholder = new Map<string, string>()
+  const types = new Set(entities.map((e) => e.type))
+  for (const type of types) {
+    const ofType = entities.filter((e) => e.type === type)
+    const main = ofType.filter((e) => !e.candidate && !e.dismissed)
+    const rest = ofType.filter((e) => e.candidate || e.dismissed)
+
+    let n = 1
+    for (const e of sortByNumber(main)) newPlaceholder.set(e.id, `[${type}_${n++}]`)
+    for (const e of sortByNumber(rest)) newPlaceholder.set(e.id, `[${type}_${n++}]`)
+  }
+
+  let changed = false
+  const result = entities.map((e) => {
+    const next = newPlaceholder.get(e.id)!
+    if (next === e.placeholder) return e
+    changed = true
+    return { ...e, placeholder: next }
+  })
+  return changed ? result : entities
+}
+
 // Guard against stale persisted history docs that may contain duplicate ids
 // (pre-fix bug: id was derived from placeholder). Keeps the first occurrence
 // of each id and assigns a fresh UUID to any later duplicate.

@@ -5,6 +5,7 @@ import {
   addOccurrenceToEntity,
   buildAnonymizedText,
   changeEntityType,
+  compactPlaceholderNumbers,
   dedupeEntityIds,
   entityCurrentValue,
   mergeEntities,
@@ -908,5 +909,73 @@ describe('acceptCandidate', () => {
     ]
     const result = acceptCandidate(entities, 'no-such-id')
     expect(result).toBe(entities)
+  })
+})
+
+describe('compactPlaceholderNumbers', () => {
+  it('collapses a gap in numbering while preserving array order', () => {
+    const p1 = makeEntity({ type: 'PERSON', placeholder: '[PERSON_1]', positions: [{ start: 0, end: 1 }] })
+    const p4 = makeEntity({ type: 'PERSON', placeholder: '[PERSON_4]', positions: [{ start: 2, end: 3 }] })
+    const p5 = makeEntity({ type: 'PERSON', placeholder: '[PERSON_5]', positions: [{ start: 4, end: 5 }] })
+    const entities = [p1, p4, p5]
+
+    const result = compactPlaceholderNumbers(entities)
+
+    expect(result.map((e) => e.placeholder)).toEqual(['[PERSON_1]', '[PERSON_2]', '[PERSON_3]'])
+    expect(result.map((e) => e.id)).toEqual(entities.map((e) => e.id))
+  })
+
+  it('renumbers each type independently', () => {
+    const c1 = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_1]', positions: [{ start: 0, end: 1 }] })
+    const p2 = makeEntity({ type: 'PERSON', placeholder: '[PERSON_2]', positions: [{ start: 2, end: 3 }] })
+    const c3 = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_3]', positions: [{ start: 4, end: 5 }] })
+
+    const result = compactPlaceholderNumbers([c1, p2, c3])
+
+    expect(result.find((e) => e.id === c1.id)?.placeholder).toBe('[COMPANY_1]')
+    expect(result.find((e) => e.id === p2.id)?.placeholder).toBe('[PERSON_1]')
+    expect(result.find((e) => e.id === c3.id)?.placeholder).toBe('[COMPANY_2]')
+  })
+
+  it('keeps candidates and dismissed entities numbered after confirmed ones of the same type', () => {
+    const confirmedA = makeEntity({ type: 'PERSON', placeholder: '[PERSON_1]', positions: [{ start: 0, end: 1 }] })
+    const confirmedB = makeEntity({ type: 'PERSON', placeholder: '[PERSON_5]', positions: [{ start: 2, end: 3 }] })
+    const candidate = makeEntity({
+      type: 'PERSON',
+      placeholder: '[PERSON_7]',
+      positions: [{ start: 4, end: 5 }],
+      anonymize: false,
+      candidate: true,
+    })
+    const dismissed = makeEntity({
+      type: 'PERSON',
+      placeholder: '[PERSON_9]',
+      positions: [{ start: 6, end: 7 }],
+      anonymize: false,
+      dismissed: true,
+    })
+
+    const result = compactPlaceholderNumbers([confirmedA, confirmedB, candidate, dismissed])
+
+    expect(result.find((e) => e.id === confirmedA.id)?.placeholder).toBe('[PERSON_1]')
+    expect(result.find((e) => e.id === confirmedB.id)?.placeholder).toBe('[PERSON_2]')
+    expect(result.find((e) => e.id === candidate.id)?.placeholder).toBe('[PERSON_3]')
+    expect(result.find((e) => e.id === dismissed.id)?.placeholder).toBe('[PERSON_4]')
+  })
+
+  it('returns the same array reference when numbering is already dense', () => {
+    const entities = [
+      makeEntity({ type: 'PERSON', placeholder: '[PERSON_1]', positions: [{ start: 0, end: 1 }] }),
+      makeEntity({ type: 'PERSON', placeholder: '[PERSON_2]', positions: [{ start: 2, end: 3 }] }),
+      makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_1]', positions: [{ start: 4, end: 5 }] }),
+    ]
+
+    const result = compactPlaceholderNumbers(entities)
+
+    expect(result).toBe(entities)
+  })
+
+  it('does not throw on an empty array', () => {
+    expect(compactPlaceholderNumbers([])).toEqual([])
   })
 })

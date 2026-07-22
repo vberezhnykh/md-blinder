@@ -6,7 +6,7 @@ import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { runSecondPass } from './lib/anonymize/secondPass'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import type { Entity, EntityType } from './lib/anonymize/types'
@@ -330,11 +330,11 @@ function App() {
   }, [])
 
   const handleDelete = useCallback((id: string) => {
-    setEntities((prev) => prev.filter((e) => e.id !== id))
+    setEntities((prev) => compactPlaceholderNumbers(prev.filter((e) => e.id !== id)))
   }, [])
 
   const handleMergeEntity = useCallback((sourceId: string, targetId: string) => {
-    setEntities((prev) => mergeEntities(prev, sourceId, targetId))
+    setEntities((prev) => compactPlaceholderNumbers(mergeEntities(prev, sourceId, targetId)))
   }, [])
 
   const handleAcceptCandidate = useCallback((id: string) => {
@@ -351,7 +351,7 @@ function App() {
 
   const handleAddEntity = useCallback(
     (from: number, to: number) => {
-      setEntities((prev) => addEntityFromSelection(prev, sourceText, from, to, selectedType))
+      setEntities((prev) => compactPlaceholderNumbers(addEntityFromSelection(prev, sourceText, from, to, selectedType)))
     },
     [sourceText, selectedType],
   )
