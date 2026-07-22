@@ -145,4 +145,49 @@ describe('filterGenericNerMatches', () => {
     expect(result[0].value).toBe('John Smith')
     expect(result[0].start).toBe(0)
   })
+
+  it('drops generic PERSON phrases built from participial/adjective modifiers', () => {
+    const dropped = ['permitted subcontractors', 'Impacted Party', 'natural person']
+    const matches = dropped.map((v) => match('PERSON', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  // В системе нет типа DATE, значит дата не может быть валидной сущностью
+  // ни для одного из проверяемых типов.
+  it('drops a date mislabeled as REG_NUMBER or PERSON', () => {
+    const dropped: [EntityType, string][] = [
+      ['REG_NUMBER', '05.06.2026'],
+      ['REG_NUMBER', '2026-06-05'],
+      ['PERSON', '5/6/26'],
+      ['REG_NUMBER', '31.12.1999'],
+      ['REG_NUMBER', '12/25/2024'], // американский порядок m/d/y
+    ]
+    const result = filterGenericNerMatches(dropped.map(([t, v]) => match(t, v)))
+    expect(result).toHaveLength(0)
+  })
+
+  // Регрессия recall: GENERIC_DATE не должна отбрасывать регномера, которые
+  // просто выглядят как дата по разделителям, но не проходят по диапазону
+  // дня/месяца (день/месяц > 31/12 соответственно).
+  it('keeps date-shaped values that are not plausible dates (recall regression)', () => {
+    const kept: [EntityType, string][] = [
+      ['REG_NUMBER', '12.34.5678'],
+      ['REG_NUMBER', '99.99.9999'],
+      ['REG_NUMBER', '45.13.2020'],
+      ['REG_NUMBER', '2026-13-45'],
+    ]
+    const result = filterGenericNerMatches(kept.map(([t, v]) => match(t, v)))
+    expect(result).toHaveLength(kept.length)
+  })
+
+  // Регрессия recall: значения не покрытые другими тестами файла, которые
+  // фильтр не должен отбрасывать.
+  it('keeps real reg-numbers/companies not covered elsewhere (recall regression)', () => {
+    const kept = [match('REG_NUMBER', 'HU12345678'), match('COMPANY', 'Consultant Software')]
+    const result = filterGenericNerMatches(kept)
+    expect(result).toHaveLength(2)
+  })
 })

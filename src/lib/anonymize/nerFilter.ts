@@ -62,6 +62,14 @@ const GENERIC_MODIFIERS = new Set([
   'marketing', 'technical', 'financial', 'legal', 'commercial', 'operational',
   'administrative', 'corporate', 'vice', 'deputy', 'assistant', 'acting',
   'interim', 'regional', 'local', 'national', 'international', 'global',
+  // причастия/прилагательные из юридических определений ("permitted
+  // subcontractors", "Impacted Party", "natural person") — без них родовая
+  // фраза не набирала allGeneric и ложняк проходил насквозь.
+  'permitted', 'impacted', 'natural', 'juridical', 'physical', 'authorized',
+  'authorised', 'designated', 'approved', 'named', 'nominated', 'appointed',
+  'potential', 'prospective', 'former', 'current', 'future', 'participating',
+  'contracting', 'remaining', 'surviving', 'successor', 'underlying',
+  'intended', 'eligible', 'qualified',
 ])
 
 const CONNECTORS = new Set(['and', 'or', 'of', 'to', 'for', 'in', 'on', 'at', 'by', 'with'])
@@ -69,6 +77,20 @@ const CONNECTORS = new Set(['and', 'or', 'of', 'to', 'for', 'in', 'on', 'at', 'b
 // Британский почтовый индекс (формат вида SW1A 1AA, EC1A 1BB). GLiNER иногда тегает
 // индекс-хвост адреса как REG_NUMBER — это ложняк, отбрасываем.
 const UK_POSTCODE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s*\d[A-Za-z]{2}$/
+
+// Дата целиком (dd.mm.yyyy / dd.mm.yy / yyyy-mm-dd / yyyy.mm.dd, разделители
+// . / -, единообразные внутри одной даты — обратная ссылка на группу
+// разделителя). В системе нет типа DATE (см. EntityType), значит дата не
+// может быть валидной сущностью ни для одного из проверяемых типов —
+// GLiNER иногда тегает её как REG_NUMBER или PERSON.
+//
+// День и месяц должны быть правдоподобны (день 1-31, месяц 1-12), иначе
+// регномер вида "12.34.5678" (второй блок 34 — не день) ошибочно матчился
+// как дата и терял recall. В day-first ветке порядок первых двух чисел не
+// фиксирован (принимаем и европейский d.m, и американский m/d) — важно
+// лишь, чтобы оба были в диапазоне 1-31 и хотя бы одно из них — в 1-12.
+const GENERIC_DATE =
+  /^\s*(?:(?:(?:0?[1-9]|1[0-2])([./-])(?:0?[1-9]|[12]\d|3[01])\1\d{2,4}|(?:0?[1-9]|[12]\d|3[01])([./-])(?:0?[1-9]|1[0-2])\2\d{2,4})|\d{4}([./-])(?:0?[1-9]|1[0-2])\3(?:0?[1-9]|[12]\d|3[01]))\s*$/
 
 // Суффиксы юрлиц: PERSON-спан, содержащий такой токен, — это компания, ошибочно
 // помеченная человеком (обычно OCR-склейка двух названий: "ACME LIMITED GLOBEX LLC").
@@ -137,6 +159,11 @@ export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
     // Индекс, ошибочно помеченный REG_NUMBER (формат "SW1A 1AA"). Проверяем ДО
     // раннего пропуска «в спане есть цифра» — в индексе цифры есть.
     if (m.type === 'REG_NUMBER' && UK_POSTCODE.test(m.value.trim())) continue
+
+    // Дата, ошибочно помеченная любым из проверяемых типов ("05.06.2026" как
+    // REG_NUMBER, "5/6/26" как PERSON). Тоже проверяем ДО шортката на цифры —
+    // в дате они есть. В отличие от UK_POSTCODE, не привязано к типу REG_NUMBER.
+    if (GENERIC_DATE.test(m.value)) continue
 
     // Обрезаем ведущий титул/должность у PERSON ("Director John Smith" →
     // "John Smith"): смещаем start на длину совпадения, чтобы позиции остались
