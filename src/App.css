@@ -581,9 +581,9 @@
 
 .entity-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 6px 6px;
+  padding: 8px 6px;
   margin: 0 -6px;
   border-radius: var(--radius-xs);
   border-bottom: 1px solid var(--line);
@@ -595,40 +595,83 @@
   background: var(--sunk);
 }
 
-.entity-row .cell-placeholder {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: nowrap;
+/* значение и служебная строка — в колонку, чтобы значению доставалась вся ширина */
+.entity-row .entity-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.entity-row .entity-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.entity-row .entity-actions {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.entity-row .cell-placeholder {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-3);
+  background: var(--accent-wash);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+  font-size: 11px;
   /* Pico стилизует [role="button"] как кнопку — сбрасываем до обычного текста */
-  display: inline;
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  border: none;
+  line-height: 1.5;
+}
+
+.entity-row select {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 140px;
+  font-size: 12px;
+}
+
+.entity-row .cell-value {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  /* сброс Pico для [role="button"] */
   width: auto;
   margin: 0;
   padding: 0;
   border: none;
   background: transparent;
-  color: inherit;
-  font-size: inherit;
-  line-height: inherit;
-}
-
-.entity-row select {
-  flex: 0 0 auto;
-  max-width: 108px;
-  font-size: 12px;
-}
-
-.entity-row .cell-value {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .entity-row .cell-count {
   flex: 0 0 auto;
   color: var(--pico-muted-color);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.entity-row .cell-count::before {
+  content: '×';
 }
 
 .entity-row .entity-delete {
@@ -665,6 +708,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -727,16 +771,19 @@
 
 .entity-row input[type='checkbox'] {
   margin-bottom: 0;
+  margin-top: 2px;
   width: auto;
   flex: 0 0 auto;
 }
 
-.entity-row .cell-placeholder {
+.entity-row .cell-value[role='button'] {
   cursor: pointer;
 }
 
-.entity-row .cell-placeholder:hover {
+.entity-row .cell-value[role='button']:hover {
+  color: var(--accent);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .cm-panels {
