@@ -224,27 +224,38 @@ export function acceptCandidate(entities: Entity[], id: string): Entity[] {
 }
 
 // Fold the source entity's occurrences into the target entity (they become one,
-// sharing the TARGET's placeholder and value). The target keeps its type/value/
-// placeholder/flags; the source is removed. Positions are unioned and sorted,
-// dropping exact-duplicate and overlapping source positions already covered by
-// the target. No-op if ids are equal or either is missing.
+// sharing the TARGET's type/value/placeholder). The source is removed. Positions
+// are merged and overlapping ranges are unioned (not dropped — dropping would
+// leave part of the source's original text unredacted in the export); touching-
+// but-not-overlapping ranges stay separate. anonymize is the logical OR of both
+// (fail-safe: merging an active source into an inactive target must not silently
+// stop redacting the source's occurrences). No-op if ids are equal, either is
+// missing, or the two entities have different types.
 export function mergeEntities(entities: Entity[], sourceId: string, targetId: string): Entity[] {
   if (sourceId === targetId) return entities
   const source = entities.find((e) => e.id === sourceId)
   const target = entities.find((e) => e.id === targetId)
   if (!source || !target) return entities
+  if (source.type !== target.type) return entities
 
-  const positions = [...target.positions]
-  for (const p of source.positions) {
-    const overlaps = positions.some((existing) => p.start < existing.end && existing.start < p.end)
-    if (overlaps) continue
-    positions.push(p)
+  const merged = [...target.positions, ...source.positions].sort((a, b) => a.start - b.start || a.end - b.end)
+  const positions: { start: number; end: number }[] = []
+  let cur: { start: number; end: number } | null = null
+  for (const next of merged) {
+    if (cur === null) {
+      cur = { ...next }
+    } else if (next.start < cur.end) {
+      cur = { start: cur.start, end: Math.max(cur.end, next.end) }
+    } else {
+      positions.push(cur)
+      cur = { ...next }
+    }
   }
-  positions.sort((a, b) => a.start - b.start)
+  if (cur !== null) positions.push(cur)
 
   return entities
     .filter((e) => e.id !== sourceId)
-    .map((e) => (e.id === targetId ? { ...e, positions } : e))
+    .map((e) => (e.id === targetId ? { ...e, positions, anonymize: target.anonymize || source.anonymize } : e))
 }
 
 // Guard against stale persisted history docs that may contain duplicate ids

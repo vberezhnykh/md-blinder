@@ -566,7 +566,7 @@ describe('mergeEntities', () => {
     expect(merged.positions).toHaveLength(2)
   })
 
-  it('does not double-add overlapping/duplicate source positions already covered by the target', () => {
+  it('unions overlapping source positions instead of dropping them', () => {
     const target = makeEntity({
       id: 'target-1',
       type: 'COMPANY',
@@ -586,7 +586,122 @@ describe('mergeEntities', () => {
     const result = mergeEntities([target, source], 'source-1', 'target-1')
 
     const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.positions).toEqual([{ start: 0, end: 4 }, { start: 20, end: 25 }])
+  })
+
+  it('does not merge touching (non-overlapping) ranges', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 4 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      positions: [{ start: 4, end: 8 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.positions).toEqual([{ start: 0, end: 4 }, { start: 4, end: 8 }])
+  })
+
+  it('merging an active source into an inactive target keeps anonymize true (fail-safe OR)', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      anonymize: false,
+      positions: [{ start: 0, end: 4 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      anonymize: true,
+      positions: [{ start: 20, end: 24 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.anonymize).toBe(true)
     expect(merged.positions).toEqual([{ start: 0, end: 4 }, { start: 20, end: 24 }])
+  })
+
+  it('merging two inactive entities keeps anonymize false', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      anonymize: false,
+      positions: [{ start: 0, end: 4 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      anonymize: false,
+      positions: [{ start: 20, end: 24 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.anonymize).toBe(false)
+  })
+
+  it('is a no-op when merging entities of different types', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'PERSON',
+      placeholder: '[PERSON_1]',
+      value: 'John',
+      positions: [{ start: 0, end: 4 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 20, end: 24 }],
+    })
+    const entities = [target, source]
+
+    const result = mergeEntities(entities, 'source-1', 'target-1')
+
+    expect(result).toBe(entities)
+  })
+
+  it('unions a partial overlap where the source is wider than the target', () => {
+    const target = makeEntity({
+      id: 'target-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_1]',
+      value: 'Acme',
+      positions: [{ start: 2, end: 5 }],
+    })
+    const source = makeEntity({
+      id: 'source-1',
+      type: 'COMPANY',
+      placeholder: '[COMPANY_2]',
+      value: 'Acme',
+      positions: [{ start: 0, end: 10 }],
+    })
+
+    const result = mergeEntities([target, source], 'source-1', 'target-1')
+
+    const merged = result.find((e) => e.id === 'target-1')!
+    expect(merged.positions).toEqual([{ start: 0, end: 10 }])
   })
 
   it('is a no-op when sourceId === targetId', () => {

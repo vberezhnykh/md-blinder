@@ -28,7 +28,8 @@ interface SelectionPopupState {
 
 interface ActiveSpan {
   entityId: string
-  posIndex: number
+  start: number
+  end: number
 }
 
 interface MergePopupState {
@@ -72,14 +73,15 @@ function buildDecorations(entities: Entity[], active: ActiveSpan | null): Decora
   let activePos: { start: number; end: number } | null = null
   if (active) {
     const e = entities.find((it) => it.id === active.entityId)
-    const p = e?.positions[active.posIndex]
+    const p = e?.positions.find((p) => p.start === active.start && p.end === active.end)
     if (p && p.end > p.start) activePos = p
   }
 
   for (const e of entities) {
-    e.positions.forEach((p, i) => {
+    e.positions.forEach((p) => {
       if (p.end <= p.start) return
-      const isActive = activePos !== null && e.id === active?.entityId && i === active?.posIndex
+      const isActive =
+        activePos !== null && e.id === active?.entityId && p.start === active?.start && p.end === active?.end
       const cls = e.candidate
         ? 'cm-entity cm-entity-candidate'
         : `cm-entity cm-entity-${e.type}${e.anonymize ? '' : ' cm-entity-inactive'}`
@@ -181,16 +183,30 @@ function EntityEditor({
         if (sel.empty) {
           setSelectionPopup(null)
           const head = sel.head
-          let next: ActiveSpan | null = null
-          find: for (const e of entitiesRef.current) {
-            for (let i = 0; i < e.positions.length; i++) {
-              const p = e.positions[i]
-              if (head >= p.start && head <= p.end) {
-                next = { entityId: e.id, posIndex: i }
-                break find
+          // Собираем всех кандидатов: сначала строго внутренние совпадения
+          // (курсор строго между start и end), и только если таких нет — граничные
+          // (курсор ровно на start или end). Внутри выбранной группы берём самый
+          // узкий диапазон (при вложенных сущностях это самая "специфичная"), при
+          // равной ширине — первый по порядку обхода.
+          let bestInner: { entityId: string; p: { start: number; end: number } } | null = null
+          let bestBoundary: { entityId: string; p: { start: number; end: number } } | null = null
+          for (const e of entitiesRef.current) {
+            for (const p of e.positions) {
+              if (head > p.start && head < p.end) {
+                if (!bestInner || p.end - p.start < bestInner.p.end - bestInner.p.start) {
+                  bestInner = { entityId: e.id, p }
+                }
+              } else if (head === p.start || head === p.end) {
+                if (!bestBoundary || p.end - p.start < bestBoundary.p.end - bestBoundary.p.start) {
+                  bestBoundary = { entityId: e.id, p }
+                }
               }
             }
           }
+          const best = bestInner ?? bestBoundary
+          const next: ActiveSpan | null = best
+            ? { entityId: best.entityId, start: best.p.start, end: best.p.end }
+            : null
           setActiveSpan(next)
 
           if (next === null) {
@@ -198,7 +214,7 @@ function EntityEditor({
             setMergePickerOpen(false)
           } else {
             const e = entitiesRef.current.find((x) => x.id === next.entityId)
-            const p = e?.positions[next.posIndex]
+            const p = { start: next.start, end: next.end }
             const mergeable =
               e != null &&
               !e.candidate &&
@@ -274,13 +290,17 @@ function EntityEditor({
         const active = activeSpanRef.current
         if (!active) return false
         const entity = entitiesRef.current.find((e) => e.id === active.entityId)
-        const startPos = entity?.positions[active.posIndex]
+        const startPos = entity?.positions.find((p) => p.start === active.start && p.end === active.end)
         if (!startPos) return false
 
         event.preventDefault()
 
         const fixedStart = startPos.start
         const fixedEnd = startPos.end
+        // The position currently being dragged. Its start/end move as the frame is
+        // applied, so subsequent frames must match against IT (not the stale
+        // activeSpan) to find which entry in entities[].positions to replace.
+        let currentPos = startPos
         let rafId: number | null = null
         let pendingEvent: MouseEvent | null = null
 
@@ -303,11 +323,34 @@ function EntityEditor({
             nextPos = { start: fixedStart, end: newEnd }
           }
 
+          // Clamp against every OTHER occurrence (any entity, including other
+          // occurrences of the same entity) so the handle can't be dragged over a
+          // neighboring range and create an overlap — that's exactly the shape of
+          // corruption mergeEntities has to union away.
+          const candidate = nextPos
+          for (const en of entitiesRef.current) {
+            for (const p of en.positions) {
+              if (en.id === active.entityId && p.start === currentPos.start && p.end === currentPos.end) continue
+              const overlaps = p.start < candidate.end && candidate.start < p.end
+              if (!overlaps) continue
+              if (side === 'left') {
+                nextPos = { start: Math.max(nextPos.start, p.end), end: nextPos.end }
+              } else {
+                nextPos = { start: nextPos.start, end: Math.min(nextPos.end, p.start) }
+              }
+            }
+          }
+          if (nextPos.start >= nextPos.end) return
+
           const nextEntities = entitiesRef.current.map((en) => {
             if (en.id !== active.entityId) return en
-            const positions = en.positions.map((p, i) => (i === active.posIndex ? nextPos : p))
+            const positions = en.positions.map((p) =>
+              p.start === currentPos.start && p.end === currentPos.end ? nextPos : p,
+            )
             return { ...en, positions }
           })
+          currentPos = nextPos
+          setActiveSpan({ entityId: active.entityId, start: nextPos.start, end: nextPos.end })
           onChangeRef.current(view.state.doc.toString(), nextEntities)
         }
 
