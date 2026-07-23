@@ -131,6 +131,15 @@ const GENERIC_REGNUM_WORDS = new Set([
   'their', 'our',
 ])
 
+// Ведущая родовая обёртка reg-номера ("registration number 193394577",
+// "Company registration no. 193...", "VAT No. GB12"). NER часто включает её в
+// спан — отрезаем её и оставляем сам номер, требуя разделитель после каждого
+// слова (сработает только когда дальше идёт номер). Собрано из GENERIC_REGNUM_WORDS.
+const LEADING_REGNUM_GENERIC = new RegExp(
+  `^(?:(?:${[...GENERIC_REGNUM_WORDS].join('|')})[\\s.,:#/&-]+)+`,
+  'i',
+)
+
 function splitWords(value: string): string[] {
   return value
     .trim()
@@ -173,6 +182,17 @@ export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
     // валидными и спан слился с уже найденным именем.
     if (m.type === 'PERSON') {
       const t = LEADING_TITLE.exec(m.value)
+      if (t && t[0].length < m.value.length) {
+        const cut = t[0].length
+        m = { ...m, value: m.value.slice(cut), start: m.start + cut }
+      }
+    }
+
+    // Обрезаем ведущую родовую обёртку у REG_NUMBER ("registration number
+    // 193394577" → "193394577"): так же смещаем start, оставляя в спане только
+    // сам номер. ДО шортката на цифры — иначе обёртка ушла бы в значение целиком.
+    if (m.type === 'REG_NUMBER') {
+      const t = LEADING_REGNUM_GENERIC.exec(m.value)
       if (t && t[0].length < m.value.length) {
         const cut = t[0].length
         m = { ...m, value: m.value.slice(cut), start: m.start + cut }

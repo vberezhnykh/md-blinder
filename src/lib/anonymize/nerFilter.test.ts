@@ -146,6 +146,35 @@ describe('filterGenericNerMatches', () => {
     expect(result[0].start).toBe(0)
   })
 
+  it('trims a leading generic wrapper from a REG_NUMBER, keeping the number with adjusted offsets', () => {
+    const cases: [string, string][] = [
+      ['registration number 193394577', '193394577'],
+      ['Company registration no. 193394577', '193394577'],
+      ['VAT No. GB123456789', 'GB123456789'],
+    ]
+    for (const [value, number] of cases) {
+      const result = filterGenericNerMatches([match('REG_NUMBER', value)])
+      expect(result).toHaveLength(1)
+      expect(result[0].value).toBe(number)
+      // start сдвинут на длину обёртки, end остался прежним → спан = сам номер.
+      expect(result[0].start).toBe(value.length - number.length)
+      expect(result[0].end).toBe(value.length)
+    }
+  })
+
+  it('leaves a wrapper-less REG_NUMBER untouched', () => {
+    const result = filterGenericNerMatches([match('REG_NUMBER', 'HU12345678')])
+    expect(result).toHaveLength(1)
+    expect(result[0].value).toBe('HU12345678')
+    expect(result[0].start).toBe(0)
+  })
+
+  it('still drops a pure generic reg-number wrapper with no number', () => {
+    const dropped = ['registration number', 'company number']
+    const result = filterGenericNerMatches(dropped.map((v) => match('REG_NUMBER', v)))
+    expect(result).toHaveLength(0)
+  })
+
   it('drops generic PERSON phrases built from participial/adjective modifiers', () => {
     const dropped = ['permitted subcontractors', 'Impacted Party', 'natural person']
     const matches = dropped.map((v) => match('PERSON', v))
