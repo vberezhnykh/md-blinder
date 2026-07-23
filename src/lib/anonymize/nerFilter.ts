@@ -42,6 +42,8 @@ const ROLE_NOUNS = new Set([
   'assignor', 'franchisor', 'franchisee', 'payer', 'payee', 'obligor',
   'obligee', 'indemnitor', 'indemnitee', 'attorney', 'advisor', 'adviser',
   'auditor', 'accountant', 'broker', 'dealer', 'reseller', 'integrator',
+  'contributor', 'contributors', 'participant', 'participants', 'collaborator',
+  'collaborators', 'consignor', 'consignee', 'bailor', 'bailee',
   // standalone titles (also stripped when leading a name via LEADING_TITLE);
   // as bare spans they read as roles, not PII.
   'ceo', 'cfo', 'cto', 'coo', 'chairman', 'chairperson', 'chairwoman',
@@ -65,6 +67,7 @@ const GENERIC_MODIFIERS = new Set([
   // причастия/прилагательные из юридических определений ("permitted
   // subcontractors", "Impacted Party", "natural person") — без них родовая
   // фраза не набирала allGeneric и ложняк проходил насквозь.
+  'undersigned', 'signing',
   'permitted', 'impacted', 'natural', 'juridical', 'physical', 'authorized',
   'authorised', 'designated', 'approved', 'named', 'nominated', 'appointed',
   'potential', 'prospective', 'former', 'current', 'future', 'participating',

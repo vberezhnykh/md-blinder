@@ -90,12 +90,13 @@ try {
     const tablePlaceholder = '.replacement-table .cell-placeholder'
     await page.waitForSelector(listPlaceholder, { timeout: 15000 })
 
-    let ok = true
-    ok = expectSame(
+    // Each expectSame() sets the exit code via fail() on mismatch, so the
+    // checks just run in sequence.
+    expectSame(
       await placeholders(page, listPlaceholder),
       ['[PERSON_1]', '[PERSON_2]', '[PERSON_3]', '[PERSON_4]'],
       'seeded list',
-    ) && ok
+    )
 
     // Delete the SECOND entity: 3 and 4 must shift down to 2 and 3.
     await page.locator('.entity-row .entity-delete').nth(1).click()
@@ -105,16 +106,16 @@ try {
       { timeout: 10000 },
     ).catch(() => {})
 
-    ok = expectSame(
+    expectSame(
       await placeholders(page, listPlaceholder),
       ['[PERSON_1]', '[PERSON_2]', '[PERSON_3]'],
       'list after deleting the 2nd entity',
-    ) && ok
-    ok = expectSame(
+    )
+    expectSame(
       await placeholders(page, tablePlaceholder),
       ['[PERSON_1]', '[PERSON_2]', '[PERSON_3]'],
       'replacement table after deleting the 2nd entity',
-    ) && ok
+    )
 
     // Delete the first one too — the rest must stay dense.
     await page.locator('.entity-row .entity-delete').first().click()
@@ -124,16 +125,16 @@ try {
       { timeout: 10000 },
     ).catch(() => {})
 
-    ok = expectSame(
+    expectSame(
       await placeholders(page, listPlaceholder),
       ['[PERSON_1]', '[PERSON_2]'],
       'list after deleting the 1st entity',
-    ) && ok
-    ok = expectSame(
+    )
+    expectSame(
       await placeholders(page, tablePlaceholder),
       ['[PERSON_1]', '[PERSON_2]'],
       'replacement table after deleting the 1st entity',
-    ) && ok
+    )
 
     // The anonymized output must use the new numbers, with no stale [PERSON_3].
     // It only renders once the view is switched away from the editor.

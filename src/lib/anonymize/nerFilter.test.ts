@@ -155,6 +155,17 @@ describe('filterGenericNerMatches', () => {
     }
   })
 
+  // Ролевые термины договора ("Contributor", "the Contributor", "undersigned
+  // contributor") GLiNER тегает как PERSON — это определения ролей, не PII.
+  it('drops "contributor" role/defined terms tagged as PERSON', () => {
+    const dropped = ['Contributor', 'the Contributor', 'undersigned contributor']
+    const matches = dropped.map((v) => match('PERSON', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
   // В системе нет типа DATE, значит дата не может быть валидной сущностью
   // ни для одного из проверяемых типов.
   it('drops a date mislabeled as REG_NUMBER or PERSON', () => {
