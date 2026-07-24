@@ -140,6 +140,98 @@ const LEADING_REGNUM_GENERIC = new RegExp(
   'i',
 )
 
+// Мультиязычная NER-модель так же уверенно (0.8-0.95) тегает русские
+// ролевые/родовые термины договора ("Заказчик", "Исполнитель", "Сторона",
+// "третьи лица", "порядковый номер", "адрес электронной почты") как
+// PERSON/COMPANY/REG_NUMBER/ADDRESS — это обозначения ролей, а не PII.
+// Русские слова склоняются ("Заказчик/Заказчика/Заказчиком"), поэтому
+// точное сравнение недостаточно. Гибрид: длинные однозначные корни матчим
+// по префиксу (word.startsWith(stem)), короткие/неоднозначные — точным
+// списком форм (иначе префикс «лиц» ошибочно поймал бы «лицензия», поэтому
+// «лицо» — списком форм). RU_REGNUM_WORDS/RU_ADDRESS_WORDS тоже матчатся по
+// префиксу: часть записей там — намеренно урезанные корни («электронн»,
+// «почтов», «эл»), нужные, чтобы поймать «электронной», «почтовый» и т.п.
+
+const RU_ROLE_STEMS = [
+  'заказчик', 'исполнител', 'арендатор', 'субарендатор', 'арендодател',
+  'поставщик', 'покупател', 'продавец', 'продавц', 'подрядчик',
+  'субподрядчик', 'заёмщик', 'заемщик', 'кредитор', 'должник', 'поручител',
+  'залогодател', 'залогодержател', 'посредник', 'принципал', 'доверител',
+  'поверенн', 'представител', 'работник', 'сотрудник', 'соисполнител',
+  'обладател', 'правообладател', 'пользовател', 'потребител', 'приобретател',
+  'участник', 'учредител', 'акционер', 'руководител', 'директор', 'сторон',
+  'гарант', 'контрагент',
+]
+
+const RU_ROLE_FORMS = new Set([
+  'лицо', 'лица', 'лицу', 'лицом', 'лице', 'лиц', 'лицам', 'лицами', 'лицах',
+  'фио', 'общество', 'общества', 'обществу', 'обществом', 'обществе',
+  'агент', 'агента', 'агенту', 'агентом', 'агенте', 'агенты', 'фирма',
+  'фирмы', 'фирме', 'фирму', 'фирмой',
+])
+
+const RU_MODIFIER_STEMS = [
+  'уполномоченн', 'ответственн', 'виновн', 'аффилированн', 'должностн',
+  'физическ', 'юридическ', 'генеральн', 'ограниченн', 'соответствующ',
+  'указанн', 'настоящ', 'названн', 'получивш', 'передающ', 'раскрывающ',
+  'нарушивш', 'направивш', 'обязанн', 'уведомляющ', 'порядков',
+  'регистрационн', 'идентификационн', 'ответственност',
+]
+
+const RU_MODIFIER_FORMS = new Set([
+  'третий', 'третье', 'третья', 'третьи', 'третьих', 'третьим', 'третьими',
+  'третьему', 'третьего', 'данный', 'данного', 'данному', 'данным',
+  'данном', 'иной', 'иного', 'иному', 'иным', 'ином', 'прочий', 'прочие',
+  'прочих',
+])
+
+const RU_DETERMINERS = new Set([
+  'настоящий', 'настоящего', 'настоящему', 'настоящим', 'настоящем',
+  'указанный', 'соответствующий', 'такой', 'такого', 'каждый', 'любой',
+  'любого', 'другой', 'другого', 'свой', 'своего', 'его', 'её', 'ее',
+  'их', 'этот', 'этого', 'этом', 'тот', 'того', 'сам', 'самого',
+])
+
+const RU_CONNECTORS = new Set([
+  'с', 'и', 'или', 'по', 'для', 'от', 'за', 'при', 'между', 'а', 'но',
+])
+
+const RU_REGNUM_WORDS = [
+  'номер', 'номера', 'номеру', 'номером', 'номере', 'реестровый', 'реестровым',
+]
+
+const RU_ADDRESS_WORDS = [
+  'адрес', 'адреса', 'адресу', 'адресом', 'адресе', 'местонахождения',
+  'местонахождение', 'местонахождении', 'почтов', 'электронн', 'почты',
+  'почта', 'почте', 'нахождения', 'эл',
+]
+
+function startsWithAny(word: string, stems: string[]): boolean {
+  return stems.some((stem) => word.startsWith(stem))
+}
+
+function ruIsRoleNoun(w: string): boolean {
+  return RU_ROLE_FORMS.has(w) || startsWithAny(w, RU_ROLE_STEMS)
+}
+
+function ruIsGeneric(w: string): boolean {
+  return (
+    ruIsRoleNoun(w) ||
+    RU_MODIFIER_FORMS.has(w) ||
+    RU_DETERMINERS.has(w) ||
+    RU_CONNECTORS.has(w) ||
+    startsWithAny(w, RU_MODIFIER_STEMS)
+  )
+}
+
+function ruIsRegnumGeneric(w: string): boolean {
+  return startsWithAny(w, RU_REGNUM_WORDS) || ruIsGeneric(w)
+}
+
+function ruIsAddressGeneric(w: string): boolean {
+  return startsWithAny(w, RU_ADDRESS_WORDS) || ruIsGeneric(w)
+}
+
 function splitWords(value: string): string[] {
   return value
     .trim()
@@ -213,6 +305,12 @@ export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
       const allGeneric = words.every((w) => GENERIC_WORDS.has(w))
       const hasRoleNoun = words.some((w) => ROLE_NOUNS.has(w))
       if (allGeneric && hasRoleNoun) continue
+      // Русская ветка (параллельно английской, через OR): те же критерии
+      // «все слова родовые + есть ролевое существительное», но по
+      // русскому словарю с учётом склонений.
+      const allGenericRu = words.every(ruIsGeneric)
+      const hasRoleNounRu = words.some(ruIsRoleNoun)
+      if (allGenericRu && hasRoleNounRu) continue
       out.push(m)
       continue
     }
@@ -220,6 +318,7 @@ export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
     if (m.type === 'REG_NUMBER') {
       const allGenericRegnum = words.every((w) => GENERIC_REGNUM_WORDS.has(w))
       if (allGenericRegnum) continue
+      if (words.every(ruIsRegnumGeneric)) continue
       out.push(m)
       continue
     }
@@ -227,6 +326,7 @@ export function filterGenericNerMatches(matches: RawMatch[]): RawMatch[] {
     // ADDRESS
     const allGenericAddress = words.every((w) => GENERIC_ADDRESS_WORDS.has(w))
     if (allGenericAddress) continue
+    if (words.every(ruIsAddressGeneric)) continue
     out.push(m)
   }
   return out

@@ -231,3 +231,95 @@ describe('filterGenericNerMatches', () => {
     expect(result).toHaveLength(2)
   })
 })
+
+// Этап 3: русский словарь ролевых/родовых терминов договора. Мультиязычная
+// NER-модель тегает русские ролевые термины ("Заказчик", "Сторона", "третьи
+// лица", "порядковый номер", "адрес электронной почты") так же уверенно
+// (0.8-0.95), как английские "Client"/"Party" — это не PII.
+describe('filterGenericNerMatches (RU)', () => {
+  it('drops RU role-noun PERSON matches', () => {
+    const dropped = [
+      'Заказчик',
+      'Заказчика',
+      'Заказчику',
+      'Заказчиком',
+      'Исполнитель',
+      'Исполнителя',
+      'Сторона',
+      'Стороны',
+      'Сторонами',
+      'третьи лица',
+      'третьих лиц',
+      'уполномоченного представителя Стороны',
+      'Виновная Сторона',
+      'должностным лицам',
+      'аффилированных лиц',
+      'ФИО',
+      'работники',
+      'представителей',
+      'Арендатор',
+      'Субарендатор',
+    ]
+    const matches = dropped.map((v) => match('PERSON', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  it('drops RU role-noun COMPANY matches', () => {
+    const dropped = ['Заказчик', 'Сторонами', 'Общество с ограниченной ответственностью']
+    const matches = dropped.map((v) => match('COMPANY', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  it('drops generic RU REG_NUMBER phrases without digits', () => {
+    const dropped = ['порядковый номер', 'регистрационный номер']
+    const matches = dropped.map((v) => match('REG_NUMBER', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  it('drops generic RU ADDRESS phrases without digits', () => {
+    const dropped = ['адрес электронной почты', 'юридический адрес', 'адрес местонахождения']
+    const matches = dropped.map((v) => match('ADDRESS', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  // Регрессия recall: настоящие ФИО не должны отбрасываться, даже если
+  // содержат слоги, похожие на родовые корни.
+  it('keeps real RU PERSON names', () => {
+    const kept = [
+      'Окишев Алексей Александрович',
+      'Столяров Валентин Михайлович',
+      'Галенко Сергей Николаевич',
+      'Цой Алексей',
+      'Сергей Сущевский',
+      'Иван Петров',
+    ]
+    const result = filterGenericNerMatches(kept.map((v) => match('PERSON', v)))
+    expect(result).toHaveLength(kept.length)
+  })
+
+  // Регрессия recall: настоящие названия компаний (в т.ч. смешанные RU/EN)
+  // не должны отбрасываться.
+  it('keeps real RU/EN COMPANY names', () => {
+    const kept = [
+      'ООО «Когнитек»',
+      'ООО «Бифорком Текнолоджис»',
+      'ООО «Коммуникации технологии менеджмент»',
+      'Ling Trade Limited',
+      'Acme Ltd',
+    ]
+    const result = filterGenericNerMatches(kept.map((v) => match('COMPANY', v)))
+    expect(result).toHaveLength(kept.length)
+  })
+})
