@@ -14,13 +14,17 @@ if (!baseUrl || files.length === 0) {
 }
 
 const browser = await chromium.launch()
+// One context for the whole run: Cache Storage (the ~580MB NER model) persists
+// across files, so it downloads once instead of being re-fetched per file. A
+// fresh page per file still gives clean React state; the persisted read below
+// picks the newest IndexedDB doc, so accumulated history can't skew a result.
+const context = await browser.newContext()
 const results = {}
 
 let fileIndex = 0
 for (const file of files) {
   fileIndex++
   console.error(`[start] (${fileIndex}/${files.length}) ${basename(file)}`)
-  const context = await browser.newContext()
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
@@ -146,9 +150,10 @@ for (const file of files) {
     pageErrors: errors.slice(0, 10),
   }
 
-  await context.close()
+  await page.close()
   console.error(`[done] ${basename(file)} -> ${entities.length} entities +${candidates.length} candidates${errText ? ' (ERROR: ' + errText + ')' : ''}`)
 }
 
+await context.close()
 await browser.close()
 console.log(JSON.stringify(results, null, 2))
