@@ -1,0 +1,13 @@
+diff --git a/node_modules/gliner/dist/index.mjs b/node_modules/gliner/dist/index.mjs
+index 3c38429..b67b0ae 100644
+--- a/node_modules/gliner/dist/index.mjs
++++ b/node_modules/gliner/dist/index.mjs
+@@ -276,7 +276,7 @@ var TokenModel = class extends Model {
+ var WhitespaceTokenSplitter = class {
+   constructor() {
+     __publicField(this, "whitespacePattern");
+-    this.whitespacePattern = /\w+(?:[-_]\w+)*|\S/g;
++    this.whitespacePattern = /[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*|\S/gu;
+   }
+   *call(text) {
+     let match;

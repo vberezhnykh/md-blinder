@@ -3,15 +3,15 @@ import type { EntityType, RawMatch } from '../lib/anonymize/types'
 import { chunkText } from './chunkText'
 import { pickExecutionProvider, type ExecProvider } from './pickEp'
 
-// Two model variants by execution provider. WASM/CPU uses the int8 quantized
-// model (smaller, fast on CPU). WebGPU uses fp16 — the quantized model's int8
-// ops are NOT supported by the onnxruntime-web WebGPU EP and fall back to CPU,
-// which measured 2.75× SLOWER than wasm (27.8s vs 10.1s on an 11-chunk doc).
-// fp16 runs natively on the GPU. It is a bigger download (~306MB vs ~183MB).
-const MODEL_URL_QUANTIZED =
-  'https://huggingface.co/onnx-community/gliner_small-v2.1/resolve/main/onnx/model_quantized.onnx'
+// Multilingual GLiNER (handles Russian + English, incl. bilingual docs). We use
+// the fp16 model on BOTH execution providers. The int8 quantized and q4f16
+// variants were measured to destroy multilingual discrimination — real Russian
+// names scored ~0.16 (indistinguishable from junk) on int8 vs ~0.92 on fp16, so
+// nothing cleared the confirm threshold. fp16 runs natively on WebGPU (fast) and
+// on wasm/CPU (correct but slow, ~minutes/doc — the CPU fallback trade-off).
+// ~580MB download vs the old English-only gliner_small (~306MB fp16).
 const MODEL_URL_FP16 =
-  'https://huggingface.co/onnx-community/gliner_small-v2.1/resolve/main/onnx/model_fp16.onnx'
+  'https://huggingface.co/onnx-community/gliner_multi-v2.1/resolve/main/onnx/model_fp16.onnx'
 const CACHE_NAME = 'md-blinder-ner'
 
 interface InboundMessage {
@@ -110,15 +110,14 @@ function getGliner(requestId: string): Promise<Gliner> {
         (self as unknown as { navigator?: { gpu?: unknown } }).navigator,
       )
 
-      // Loads the EP-appropriate model (fp16 for GPU, quantized for CPU), then
-      // builds + warms up GLiNER so any runtime failure surfaces here (→ fallback).
+      // fp16 on whichever EP we run (GPU or CPU), then builds + warms up GLiNER
+      // so any runtime failure surfaces here (→ fallback).
       async function buildGliner(ep: ExecProvider): Promise<Gliner> {
-        const modelUrl = ep === 'webgpu' ? MODEL_URL_FP16 : MODEL_URL_QUANTIZED
-        const modelBytes = await loadModelBytes(modelUrl, (pct) =>
+        const modelBytes = await loadModelBytes(MODEL_URL_FP16, (pct) =>
           post({ requestId, type: 'progress', stage: 'load', pct }),
         )
         const gliner = new Gliner({
-          tokenizerPath: 'onnx-community/gliner_small-v2.1',
+          tokenizerPath: 'onnx-community/gliner_multi-v2.1',
           onnxSettings: {
             modelPath: modelBytes,
             executionProvider: ep,

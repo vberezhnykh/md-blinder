@@ -39,7 +39,9 @@ for (const file of files) {
   let sawLoading = false
   let finished = false
   const started = Date.now()
-  const deadline = started + 360000
+  // Large real-world contracts (long RU annexes) + the heavier multilingual
+  // model can exceed the old 6-min cap; allow an override via E2E_DEADLINE_MS.
+  const deadline = started + Number(process.env.E2E_DEADLINE_MS || 360000)
   let lastBeat = 0
   while (Date.now() < deadline) {
     await page.waitForTimeout(1500)
