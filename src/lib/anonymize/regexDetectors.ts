@@ -374,10 +374,112 @@ function detectRegNumber(text: string): RawMatch[] {
   return matches
 }
 
+// Российские структурные идентификаторы: ИНН/ОГРН(ИП)/КПП.
+// ВАЖНО: метки — кириллица, а \b в JS определяет границу слова только по ASCII
+// (все кириллические буквы для \b — «не-слово», как и пробел), поэтому перед
+// " КПП 123…" граница \bКПП не сработает (и пробел, и «К» — оба \W). Вместо
+// этого используем lookbehind/lookahead по буквенным классам (кириллица+латиница).
+const NOT_LETTER_BEFORE = '(?<![А-Яа-яЁёA-Za-z])'
+const NOT_LETTER_AFTER = '(?![А-Яа-яЁёA-Za-z])'
+
+function detectRussianIds(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+  // Диапазоны, уже эмитнутые combined-паттерном ("ИНН / КПП …") — простые
+  // паттерны ниже пропускают пересекающиеся матчи, чтобы не задвоить КПП.
+  const consumed: { start: number; end: number }[] = []
+  const overlaps = (s: number, e: number) => consumed.some((c) => s < c.end && c.start < e)
+
+  // Совмещённая форма "ИНН / КПП 7736321479 / 773601001" (иногда с табуляцией
+  // вместо пробела): простые паттерны её не берут, т.к. после "ИНН" идёт "/ КПП",
+  // а не цифры. Флаг d + m.indices даёт точные офсеты обеих захваченных групп.
+  const combinedRe = new RegExp(
+    NOT_LETTER_BEFORE + 'ИНН\\s*\\/\\s*КПП' + NOT_LETTER_AFTER + '[\\s:№.]*(\\d{10,12})\\s*\\/\\s*(\\d{9})(?!\\d)',
+    'gid',
+  )
+  let cm: RegExpExecArray | null
+  while ((cm = combinedRe.exec(text))) {
+    const indices = (cm as RegExpExecArray & { indices: Array<[number, number] | undefined> }).indices
+    const innRange = indices[1]
+    const kppRange = indices[2]
+    if (!innRange || !kppRange) continue
+    const [innStart, innEnd] = innRange
+    const [kppStart, kppEnd] = kppRange
+    matches.push({ type: 'REG_NUMBER', value: cm[1], start: innStart, end: innEnd })
+    matches.push({ type: 'REG_NUMBER', value: cm[2], start: kppStart, end: kppEnd })
+    consumed.push({ start: innStart, end: innEnd }, { start: kppStart, end: kppEnd })
+  }
+
+  // ИНН: 10 цифр (юрлицо) или 12 (физлицо/ИП). 12 ставим ПЕРЕД 10 в альтернации,
+  // иначе 12-значный ИНН обрежется до первых 10 цифр.
+  const innRe = new RegExp(NOT_LETTER_BEFORE + 'ИНН' + NOT_LETTER_AFTER + '[\\s:№.\\/-]*(\\d{12}|\\d{10})(?!\\d)', 'gi')
+  let im: RegExpExecArray | null
+  while ((im = innRe.exec(text))) {
+    const group = im[1]
+    const groupStart = im.index + im[0].indexOf(group)
+    const groupEnd = groupStart + group.length
+    if (overlaps(groupStart, groupEnd)) continue
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupEnd })
+  }
+
+  // ОГРНИП (15 цифр) проверяем ПЕРЕД ОГРН (13, изредка тоже 15 — иногда ОГРН
+  // пишут и для ИП), иначе метка "ОГРН" съест префикс у "ОГРНИП".
+  const ogrnipRe = new RegExp(NOT_LETTER_BEFORE + 'ОГРНИП' + NOT_LETTER_AFTER + '[\\s:№.\\/-]*(\\d{15})(?!\\d)', 'gi')
+  let opm: RegExpExecArray | null
+  while ((opm = ogrnipRe.exec(text))) {
+    const group = opm[1]
+    const groupStart = opm.index + opm[0].indexOf(group)
+    const groupEnd = groupStart + group.length
+    if (overlaps(groupStart, groupEnd)) continue
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupEnd })
+    consumed.push({ start: groupStart, end: groupEnd })
+  }
+
+  const ogrnRe = new RegExp(NOT_LETTER_BEFORE + 'ОГРН' + NOT_LETTER_AFTER + '[\\s:№.\\/-]*(\\d{15}|\\d{13})(?!\\d)', 'gi')
+  let om: RegExpExecArray | null
+  while ((om = ogrnRe.exec(text))) {
+    const group = om[1]
+    const groupStart = om.index + om[0].indexOf(group)
+    const groupEnd = groupStart + group.length
+    if (overlaps(groupStart, groupEnd)) continue
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupEnd })
+  }
+
+  // КПП: 9 цифр.
+  const kppRe = new RegExp(NOT_LETTER_BEFORE + 'КПП' + NOT_LETTER_AFTER + '[\\s:№.\\/-]*(\\d{9})(?!\\d)', 'gi')
+  let km: RegExpExecArray | null
+  while ((km = kppRe.exec(text))) {
+    const group = km[1]
+    const groupStart = km.index + km[0].indexOf(group)
+    const groupEnd = groupStart + group.length
+    if (overlaps(groupStart, groupEnd)) continue
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupEnd })
+  }
+
+  return matches
+}
+
+// Российские банковские счета (р/с, к/с, расчётный/корр. счёт) — ровно 20 цифр.
+// Метки — кириллица, поэтому та же оговорка про \b, что и в detectRussianIds:
+// используем буквенные lookbehind/lookahead вместо \b.
+function detectRussianAccounts(text: string): RawMatch[] {
+  const re =
+    /(?<![А-Яа-яЁёA-Za-z])(?:р\/с|к\/с|р\/сч|расч[ёе]тн[а-яё]*\s+сч[ёе]т[а-яё]*|корр[а-яё.]*\s*сч[ёе]т[а-яё]*)(?![А-Яа-яЁёA-Za-z])[\s:№./-]*(\d{20})(?!\d)/gi
+  const matches: RawMatch[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text))) {
+    const group = m[1]
+    const groupStart = m.index + m[0].indexOf(group)
+    matches.push({ type: 'ACCOUNT', value: group, start: groupStart, end: groupStart + group.length })
+  }
+  return matches
+}
+
 export function detectStructural(text: string): RawMatch[] {
   return [
     ...detectEmail(text),
     ...detectIban(text),
+    ...detectRussianIds(text),
+    ...detectRussianAccounts(text),
     ...detectCard(text),
     ...detectSwift(text),
     ...detectPhone(text),

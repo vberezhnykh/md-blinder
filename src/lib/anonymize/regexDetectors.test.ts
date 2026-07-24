@@ -375,4 +375,88 @@ describe('detectStructural', () => {
     const matches = detectStructural('Budget: USD 2 500 000 approved')
     expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
   })
+
+  // Stage 2 (русские структурные детекторы): ИНН/ОГРН(ИП)/КПП и р/с, к/с.
+  describe('russian ids and accounts', () => {
+    it('detects a 10-digit INN', () => {
+      const matches = detectStructural('ИНН 7736324582')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '7736324582')).toBe(true)
+    })
+
+    it('detects a 12-digit INN (individual/IP)', () => {
+      const matches = detectStructural('ИНН 500100732259')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '500100732259')).toBe(true)
+    })
+
+    it('detects a 13-digit OGRN', () => {
+      const matches = detectStructural('ОГРН 1197746606232')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '1197746606232')).toBe(true)
+    })
+
+    it('detects a 15-digit OGRNIP', () => {
+      const matches = detectStructural('ОГРНИП 315237500002317')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '315237500002317')).toBe(true)
+    })
+
+    it('detects a 9-digit KPP', () => {
+      const matches = detectStructural('КПП 773601001')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '773601001')).toBe(true)
+    })
+
+    it('splits an INN glued directly to the following KPP label into two matches', () => {
+      const matches = detectStructural('ИНН 7736363158КПП 773601001')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '7736363158')).toBe(true)
+      expect(regNumbers.some((m) => m.value === '773601001')).toBe(true)
+    })
+
+    it('detects a combined "ИНН / КПП" form as two matches without duplicating KPP', () => {
+      const matches = detectStructural('ИНН / КПП 7736321479 / 773601001')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers).toHaveLength(2)
+      expect(regNumbers.some((m) => m.value === '7736321479')).toBe(true)
+      expect(regNumbers.some((m) => m.value === '773601001')).toBe(true)
+    })
+
+    it('detects a "р/с" account number (20 digits)', () => {
+      const matches = detectStructural('р/с 40702810338000246070')
+      const accounts = matches.filter((m) => m.type === 'ACCOUNT')
+      expect(accounts.some((m) => m.value === '40702810338000246070')).toBe(true)
+    })
+
+    it('detects a "к/с" account number (20 digits)', () => {
+      const matches = detectStructural('к/с 30101810400000000225')
+      const accounts = matches.filter((m) => m.type === 'ACCOUNT')
+      expect(accounts.some((m) => m.value === '30101810400000000225')).toBe(true)
+    })
+
+    it('detects a Russian-format phone number', () => {
+      const matches = detectStructural('Телефон: +7 (903) 796-17-03')
+      const phones = matches.filter((m) => m.type === 'PHONE')
+      expect(phones.some((m) => m.value.includes('903') && m.value.includes('796-17-03'))).toBe(true)
+    })
+
+    it('reports exact offsets for a plain INN match', () => {
+      const text = 'ИНН 7736324582'
+      const matches = detectStructural(text)
+      const inn = matches.find((m) => m.type === 'REG_NUMBER' && m.value === '7736324582')
+      expect(inn).toBeDefined()
+      expect(text.slice(inn!.start, inn!.end)).toBe('7736324582')
+    })
+
+    it('does not treat a BIK as a REG_NUMBER or ACCOUNT', () => {
+      const matches = detectStructural('БИК 044525225')
+      expect(matches.some((m) => (m.type === 'REG_NUMBER' || m.type === 'ACCOUNT') && m.value === '044525225')).toBe(false)
+    })
+
+    it('does not swallow a cadastral number as a REG_NUMBER', () => {
+      const matches = detectStructural('77:06:0002019:1128-77/005/2020-12')
+      expect(matches.some((m) => m.type === 'REG_NUMBER' && m.value.includes('77:06:0002019:1128'))).toBe(false)
+    })
+  })
 })
