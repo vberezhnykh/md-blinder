@@ -393,7 +393,7 @@ function detectRussianIds(text: string): RawMatch[] {
   // вместо пробела): простые паттерны её не берут, т.к. после "ИНН" идёт "/ КПП",
   // а не цифры. Флаг d + m.indices даёт точные офсеты обеих захваченных групп.
   const combinedRe = new RegExp(
-    NOT_LETTER_BEFORE + 'ИНН\\s*\\/\\s*КПП' + NOT_LETTER_AFTER + '[\\s:№.]*(\\d{10,12})\\s*\\/\\s*(\\d{9})(?!\\d)',
+    NOT_LETTER_BEFORE + 'ИНН\\s*\\/\\s*КПП' + NOT_LETTER_AFTER + '[\\s:№.]*(\\d{12}|\\d{10})\\s*\\/\\s*(\\d{9})(?!\\d)',
     'gid',
   )
   let cm: RegExpExecArray | null

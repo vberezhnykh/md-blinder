@@ -322,4 +322,53 @@ describe('filterGenericNerMatches (RU)', () => {
     const result = filterGenericNerMatches(kept.map((v) => match('COMPANY', v)))
     expect(result).toHaveLength(kept.length)
   })
+
+  // Регрессия против утечки PII (найдена код-ревью): ruIsRoleNoun/ruIsGeneric
+  // матчили ролевые ОСНОВЫ по префиксу (startsWith), и на однословном спане
+  // allGeneric+hasRoleNoun становились тривиально истинны для реальных
+  // фамилий/брендов/городов, случайно начинающихся с того же корня. Фикс —
+  // однословный спан дропаем только по точной форме. Эти кейсы ДОЛЖНЫ
+  // выживать (не дропаться).
+  it('keeps single-word RU PERSON matches that merely share a prefix with a role stem', () => {
+    const kept = ['Работников', 'Директоров', 'Сторонин', 'Гарантов']
+    const result = filterGenericNerMatches(kept.map((v) => match('PERSON', v)))
+    expect(result).toHaveLength(kept.length)
+  })
+
+  it('keeps single-word RU COMPANY matches that merely share a prefix with a role stem', () => {
+    const kept = ['Гарант', 'Гарантия']
+    const result = filterGenericNerMatches(kept.map((v) => match('COMPANY', v)))
+    expect(result).toHaveLength(kept.length)
+  })
+
+  it('keeps single-word RU ADDRESS matches that merely share a prefix with the "эл" stem', () => {
+    const kept = ['Электросталь', 'Элиста', 'Эльбрус']
+    const result = filterGenericNerMatches(kept.map((v) => match('ADDRESS', v)))
+    expect(result).toHaveLength(kept.length)
+  })
+
+  // Регрессия: настоящие однословные дропы родовых терминов по-прежнему
+  // должны отбрасываться (фикс не должен урезать recall фильтра).
+  it('still drops real single-word RU generic PERSON terms', () => {
+    const dropped = ['Заказчик', 'Заказчика', 'Стороны', 'Исполнитель', 'Арендатор', 'работники', 'представителей']
+    const result = filterGenericNerMatches(dropped.map((v) => match('PERSON', v)))
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  // Регрессия: многословные дропы родовых фраз по-прежнему должны отбрасываться.
+  it('still drops multi-word RU generic phrases', () => {
+    const droppedPerson = ['третьи лица', 'уполномоченного представителя Стороны']
+    const resultPerson = filterGenericNerMatches(droppedPerson.map((v) => match('PERSON', v)))
+    for (const v of droppedPerson) {
+      expect(resultPerson.some((m) => m.value === v)).toBe(false)
+    }
+
+    const resultAddress = filterGenericNerMatches([match('ADDRESS', 'адрес электронной почты')])
+    expect(resultAddress.some((m) => m.value === 'адрес электронной почты')).toBe(false)
+
+    const resultRegnum = filterGenericNerMatches([match('REG_NUMBER', 'порядковый номер')])
+    expect(resultRegnum.some((m) => m.value === 'порядковый номер')).toBe(false)
+  })
 })

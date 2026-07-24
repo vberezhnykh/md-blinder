@@ -148,7 +148,7 @@ function getGliner(requestId: string): Promise<Gliner> {
 
       const g = await buildGliner('wasm')
       activeEp = 'wasm'
-      console.log('[ner] execution provider: wasm (quantized)')
+      console.log('[ner] execution provider: wasm (fp16)')
       return g
     })()
   }

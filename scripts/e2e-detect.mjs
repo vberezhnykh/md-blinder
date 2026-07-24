@@ -24,6 +24,11 @@ const results = {}
 let fileIndex = 0
 for (const file of files) {
   fileIndex++
+  // Marks when this file's run began. If this file's own upload/processing
+  // errors out (or never writes a doc), the persisted-read below must not
+  // silently fall back to a stale record left by a previous file in the
+  // shared IndexedDB — that would attribute the wrong entities to this file.
+  const fileStart = Date.now()
   console.error(`[start] (${fileIndex}/${files.length}) ${basename(file)}`)
   const page = await context.newPage()
   const errors = []
@@ -99,7 +104,7 @@ for (const file of files) {
   await page.waitForTimeout(500)
   const persisted = await page
     .evaluate(
-      () =>
+      (minUpdatedAt) =>
         new Promise((resolve) => {
           try {
             const req = indexedDB.open('md-blinder')
@@ -113,9 +118,13 @@ for (const file of files) {
                 getAllReq.onerror = () => resolve(null)
                 getAllReq.onsuccess = () => {
                   const records = getAllReq.result || []
-                  if (!records.length) return resolve({ sourceText: '', scored: [] })
-                  let best = records[0]
-                  for (const r of records) {
+                  // Only records written by THIS file's run are eligible —
+                  // anything older is a stale doc from a previous file that
+                  // shared this IndexedDB context and must be ignored.
+                  const fresh = records.filter((r) => (r.updatedAt || 0) >= minUpdatedAt)
+                  if (!fresh.length) return resolve({ sourceText: '', scored: [] })
+                  let best = fresh[0]
+                  for (const r of fresh) {
                     if ((r.updatedAt || 0) > (best.updatedAt || 0)) best = r
                   }
                   const scored = (best.entities || []).map((e) => ({
@@ -134,6 +143,7 @@ for (const file of files) {
             resolve(null)
           }
         }),
+      fileStart,
     )
     .catch(() => null)
   const sourceText = persisted?.sourceText ?? null

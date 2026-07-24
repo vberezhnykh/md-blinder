@@ -423,6 +423,17 @@ describe('detectStructural', () => {
       expect(regNumbers.some((m) => m.value === '773601001')).toBe(true)
     })
 
+    // Регрессия: ИНН — строго 10 (юрлицо) или 12 (физлицо/ИП) цифр, 11-значного
+    // числа не существует. Комбинированный паттерн раньше брал `\d{10,12}`, что
+    // жадно ловило 11 цифр как валидный ИНН. Закрепляем фактическое поведение
+    // после фикса: 11-значное число не матчится как ИНН комбинированной формой.
+    it('does not treat an 11-digit number as INN in the combined "ИНН / КПП" form', () => {
+      const matches = detectStructural('ИНН / КПП 12345678901 / 773601001')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '12345678901')).toBe(false)
+      expect(regNumbers.some((m) => m.value.length === 11)).toBe(false)
+    })
+
     it('detects a "р/с" account number (20 digits)', () => {
       const matches = detectStructural('р/с 40702810338000246070')
       const accounts = matches.filter((m) => m.type === 'ACCOUNT')
