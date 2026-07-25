@@ -458,6 +458,60 @@ function detectRussianIds(text: string): RawMatch[] {
   return matches
 }
 
+// Украинские структурные идентификаторы: ЄДРПОУ/ІПН/РНОКПП.
+// В отличие от русских меток, украинские метки содержат буквы і/ї/є/ґ, которых
+// нет в диапазоне А-Яа-яЁё, поэтому lookbehind/lookahead по этому диапазону
+// (как в NOT_LETTER_BEFORE/NOT_LETTER_AFTER выше) их не покрывает: перед "і" в
+// "…ЄДРПОУі" граница не сработала бы. Вместо диапазона используем Unicode-класс
+// \p{L} (флаг u) — он покрывает вообще все буквы (рус/укр/лат), а не только
+// перечисленные явно.
+const UA_NOT_LETTER_BEFORE = '(?<!\\p{L})'
+const UA_NOT_LETTER_AFTER = '(?!\\p{L})'
+
+function detectUkrainianIds(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+
+  // ЄДРПОУ: 8 цифр. Якорь — само слово "ЄДРПОУ"; префикс "код"/"код за" перед
+  // ним необязателен ("ЄДРПОУ 12345678", "код за ЄДРПОУ 12345678" — в обоих
+  // случаях после метки идут только разделители и число).
+  const edrpouRe = new RegExp(
+    UA_NOT_LETTER_BEFORE + 'ЄДРПОУ' + UA_NOT_LETTER_AFTER + '[\\s:№#.-]*(\\d{8})(?!\\d)',
+    'giu',
+  )
+  let m: RegExpExecArray | null
+  while ((m = edrpouRe.exec(text))) {
+    const group = m[1]
+    const groupStart = m.index + m[0].indexOf(group)
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupStart + group.length })
+  }
+
+  // ІПН: 10 цифр (физлицо) либо 12 (ІПН/ПДВ юрлица). 12 ставим ПЕРЕД 10 в
+  // альтернации — иначе 12-значный номер обрежется до первых 10 цифр.
+  const ipnRe = new RegExp(
+    UA_NOT_LETTER_BEFORE + 'ІПН' + UA_NOT_LETTER_AFTER + '[\\s:№#.-]*(\\d{12}|\\d{10})(?!\\d)',
+    'giu',
+  )
+  while ((m = ipnRe.exec(text))) {
+    const group = m[1]
+    const groupStart = m.index + m[0].indexOf(group)
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupStart + group.length })
+  }
+
+  // РНОКПП (реєстраційний номер облікової картки платника податків) — 10 цифр,
+  // аналог ІПН физлица под другим названием.
+  const rnokppRe = new RegExp(
+    UA_NOT_LETTER_BEFORE + 'РНОКПП' + UA_NOT_LETTER_AFTER + '[\\s:№#.-]*(\\d{10})(?!\\d)',
+    'giu',
+  )
+  while ((m = rnokppRe.exec(text))) {
+    const group = m[1]
+    const groupStart = m.index + m[0].indexOf(group)
+    matches.push({ type: 'REG_NUMBER', value: group, start: groupStart, end: groupStart + group.length })
+  }
+
+  return matches
+}
+
 // Российские банковские счета (р/с, к/с, расчётный/корр. счёт) — ровно 20 цифр.
 // Метки — кириллица, поэтому та же оговорка про \b, что и в detectRussianIds:
 // используем буквенные lookbehind/lookahead вместо \b.
@@ -480,6 +534,7 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectIban(text),
     ...detectRussianIds(text),
     ...detectRussianAccounts(text),
+    ...detectUkrainianIds(text),
     ...detectCard(text),
     ...detectSwift(text),
     ...detectPhone(text),

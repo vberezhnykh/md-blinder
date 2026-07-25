@@ -372,3 +372,36 @@ describe('filterGenericNerMatches (RU)', () => {
     expect(resultRegnum.some((m) => m.value === 'порядковый номер')).toBe(false)
   })
 })
+
+// Украинский словарь ролевых/родовых терминов договора — по образцу русского.
+// Реальные ложняки NER на украинских документах: "Замовника" (PERSON),
+// "фізичної особи" (PERSON).
+describe('filterGenericNerMatches (UA)', () => {
+  it('drops UA role-noun PERSON matches', () => {
+    const dropped = [
+      'Замовник', 'Замовника', 'Виконавець', 'Підрядник', 'Сторони', 'Орендар',
+      'фізична особа', 'юридична особа', 'фізичної особи',
+    ]
+    const matches = dropped.map((v) => match('PERSON', v))
+    const result = filterGenericNerMatches(matches)
+    for (const v of dropped) {
+      expect(result.some((m) => m.value === v)).toBe(false)
+    }
+  })
+
+  it('drops UA role-noun COMPANY matches', () => {
+    const result = filterGenericNerMatches([match('COMPANY', 'Замовник')])
+    expect(result.some((m) => m.value === 'Замовник')).toBe(false)
+  })
+
+  // Регрессия recall: настоящие украинские (и латинские) ФИО/компании не
+  // должны отбрасываться — критично, иначе утечка PII.
+  it('keeps real UA/EN PERSON and COMPANY names (recall regression)', () => {
+    const persons = ['Петренко', 'Вікторія Петренко', 'Дерріл Ідс', 'Ідс', 'Вікторія', 'Петренко Вікторія']
+    const personResult = filterGenericNerMatches(persons.map((v) => match('PERSON', v)))
+    expect(personResult).toHaveLength(persons.length)
+
+    const companyResult = filterGenericNerMatches([match('COMPANY', 'BJSS Limited')])
+    expect(companyResult).toHaveLength(1)
+  })
+})

@@ -470,4 +470,57 @@ describe('detectStructural', () => {
       expect(matches.some((m) => m.type === 'REG_NUMBER' && m.value.includes('77:06:0002019:1128'))).toBe(false)
     })
   })
+
+  // Украинские структурные идентификаторы: ЄДРПОУ (8 цифр), ІПН/РНОКПП (10 цифр).
+  describe('ukrainian ids', () => {
+    it('detects an 8-digit YEDRPOU', () => {
+      const matches = detectStructural('ЄДРПОУ 12345678')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '12345678')).toBe(true)
+    })
+
+    it('detects YEDRPOU with the "код за ЄДРПОУ" prefix', () => {
+      const matches = detectStructural('код за ЄДРПОУ 12345678')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '12345678')).toBe(true)
+    })
+
+    it('detects a 10-digit IPN', () => {
+      const matches = detectStructural('ІПН 1234567890')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '1234567890')).toBe(true)
+    })
+
+    it('detects a 10-digit RNOKPP', () => {
+      const matches = detectStructural('РНОКПП 1234567890')
+      const regNumbers = matches.filter((m) => m.type === 'REG_NUMBER')
+      expect(regNumbers.some((m) => m.value === '1234567890')).toBe(true)
+    })
+
+    it('reports exact offsets for a YEDRPOU match', () => {
+      const text = 'ЄДРПОУ 12345678'
+      const matches = detectStructural(text)
+      const reg = matches.find((m) => m.type === 'REG_NUMBER' && m.value === '12345678')
+      expect(reg).toBeDefined()
+      expect(text.slice(reg!.start, reg!.end)).toBe('12345678')
+    })
+
+    it('reports exact offsets for an IPN match', () => {
+      const text = 'ІПН 1234567890'
+      const matches = detectStructural(text)
+      const reg = matches.find((m) => m.type === 'REG_NUMBER' && m.value === '1234567890')
+      expect(reg).toBeDefined()
+      expect(text.slice(reg!.start, reg!.end)).toBe('1234567890')
+    })
+
+    it('does not emit a REG_NUMBER for a bare "ЄДРПОУ" label without a number', () => {
+      const matches = detectStructural('Код ЄДРПОУ додається окремим листом.')
+      expect(matches.some((m) => m.type === 'REG_NUMBER')).toBe(false)
+    })
+
+    it('does not treat a random 8-digit number without a label as YEDRPOU', () => {
+      const matches = detectStructural('Номер накладної 12345678 від учора')
+      expect(matches.some((m) => m.type === 'REG_NUMBER' && m.value === '12345678')).toBe(false)
+    })
+  })
 })
