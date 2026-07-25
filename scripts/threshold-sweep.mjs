@@ -8,6 +8,7 @@
 //
 // Usage: node scripts/threshold-sweep.mjs <e2e.json>  (defaults to out-dev.json)
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { norm, scoreDetections } from './scoring-core.mjs'
 
 const inputPath = process.argv[2] || 'out-dev.json'
 const e2e = JSON.parse(readFileSync(inputPath, 'utf8'))
@@ -31,28 +32,6 @@ const manifest = JSON.parse(readFileSync('test-samples/manifest.json', 'utf8'))
 const fileToSet = {}
 for (const doc of manifest.documents) fileToSet[doc.path.split('/').pop()] = doc.set
 
-// --- matching logic, identical to scripts/score.mjs ---
-function norm(s) {
-  return (s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ')
-}
-function tokens(s) {
-  return new Set(norm(s).split(' ').filter(Boolean))
-}
-function jaccard(a, b) {
-  const A = tokens(a), B = tokens(b)
-  if (!A.size || !B.size) return 0
-  let inter = 0
-  for (const t of A) if (B.has(t)) inter++
-  return inter / (A.size + B.size - inter)
-}
-function valueMatch(goldVal, detVal) {
-  const g = norm(goldVal), d = norm(detVal)
-  if (!g || !d) return null
-  if (g === d) return 'full'
-  if (g.includes(d) || d.includes(g)) return 'partial'
-  if (jaccard(g, d) >= 0.5) return 'partial'
-  return null
-}
 const triageKey = (file, type, value) => `${file}|${type}|${norm(value)}`
 
 // Score one threshold over the whole (dev) corpus. Returns aggregate totals.
@@ -64,28 +43,15 @@ function scoreThreshold(T) {
     if (fileToSet[file] && fileToSet[file] !== 'dev') continue
     // Confirmed set at threshold T: structural (no score) OR NER score >= T.
     const detected = (res.scored || []).filter((e) => e.score === null || e.score >= T)
-    const usedDet = new Set()
-    for (const ge of gold.entities) {
-      totals.gold++
-      let best = null
-      detected.forEach((de, i) => {
-        const q = valueMatch(ge.value, de.value)
-        if (!q) return
-        const typeOk = de.type === ge.type
-        const sc = (q === 'full' ? 2 : 1) + (typeOk ? 0.5 : 0)
-        if (!best || sc > best.sc) best = { i, det: de, quality: q, typeOk, sc }
-      })
-      if (best) usedDet.add(best.i)
-      const status = !best ? 'MISS' : best.typeOk ? (best.quality === 'full' ? 'HIT' : 'PARTIAL') : 'TYPE_MISMATCH'
-      totals[status]++
-    }
-    detected.forEach((de, i) => {
-      if (usedDet.has(i)) return
+    totals.gold += gold.entities.length
+    const { goldResults, extras } = scoreDetections(gold.entities, detected, res.sourceText)
+    for (const gr of goldResults) totals[gr.status]++
+    for (const de of extras) {
       totals.extras++
       const category = triage[triageKey(file, de.type, de.value)] === 'over-capture' ? 'over-capture' : 'noise'
       if (category === 'noise') totals.noise++
       else totals.overCapture++
-    })
+    }
   }
   return totals
 }

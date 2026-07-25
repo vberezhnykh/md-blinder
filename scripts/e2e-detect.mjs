@@ -132,6 +132,7 @@ for (const file of files) {
                     value: e.value,
                     score: typeof e.score === 'number' ? e.score : null,
                     candidate: e.candidate === true,
+                    positions: Array.isArray(e.positions) ? e.positions : [],
                   }))
                   resolve({ sourceText: best.sourceText ?? '', scored })
                 }

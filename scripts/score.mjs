@@ -2,6 +2,7 @@
 // Usage: node scripts/score.mjs <e2e.json>
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename } from 'node:path'
+import { norm, scoreDetections } from './scoring-core.mjs'
 
 const e2e = JSON.parse(readFileSync(process.argv[2], 'utf8'))
 
@@ -26,33 +27,6 @@ for (const name of readdirSync('test-samples/gold')) {
 const manifest = JSON.parse(readFileSync('test-samples/manifest.json', 'utf8'))
 const fileToSet = {}
 for (const doc of manifest.documents) fileToSet[basename(doc.path)] = doc.set
-
-function norm(s) {
-  return (s || '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()
-    .replace(/\s+/g, ' ')
-}
-function tokens(s) {
-  return new Set(norm(s).split(' ').filter(Boolean))
-}
-function jaccard(a, b) {
-  const A = tokens(a), B = tokens(b)
-  if (!A.size || !B.size) return 0
-  let inter = 0
-  for (const t of A) if (B.has(t)) inter++
-  return inter / (A.size + B.size - inter)
-}
-// returns 'full' | 'partial' | null
-function valueMatch(goldVal, detVal) {
-  const g = norm(goldVal), d = norm(detVal)
-  if (!g || !d) return null
-  if (g === d) return 'full'
-  if (g.includes(d) || d.includes(g)) return 'partial'
-  if (jaccard(g, d) >= 0.5) return 'partial'
-  return null
-}
 
 function triageKey(file, type, value) {
   return `${file}|${type}|${norm(value)}`
@@ -80,29 +54,11 @@ for (const [file, res] of Object.entries(e2e)) {
     console.error(`[warn] no gold standard for "${file}" — skipping`)
     continue
   }
-  const detected = (res.entities || []).slice()
-  const usedDet = new Set()
-  const goldResults = []
-
-  for (const ge of gold.entities) {
-    let best = null // { det, quality, typeOk }
-    detected.forEach((de, i) => {
-      const q = valueMatch(ge.value, de.value)
-      if (!q) return
-      const typeOk = de.type === ge.type
-      const score = (q === 'full' ? 2 : 1) + (typeOk ? 0.5 : 0)
-      if (!best || score > best.score) best = { i, det: de, quality: q, typeOk, score }
-    })
-    if (best) usedDet.add(best.i)
-    goldResults.push({
-      gold: ge,
-      status: !best ? 'MISS' : best.typeOk ? (best.quality === 'full' ? 'HIT' : 'PARTIAL') : 'TYPE_MISMATCH',
-      matched: best ? best.det : null,
-      quality: best ? best.quality : null,
-    })
-  }
-
-  const extras = detected.filter((_, i) => !usedDet.has(i))
+  // Match against confirmed (non-candidate) scored entities only — these now
+  // carry `positions`, needed for ANCHOR matching. res.entities is kept below
+  // purely for reference/display, not for scoring.
+  const detected = (res.scored || []).filter((e) => !e.candidate)
+  const { goldResults, extras } = scoreDetections(gold.entities, detected, res.sourceText)
 
   report[file] = {
     contract: gold.title,
@@ -119,7 +75,7 @@ for (const [file, res] of Object.entries(e2e)) {
 // ---- print human-readable report ----
 const ICON = { HIT: '✅', PARTIAL: '🟡', TYPE_MISMATCH: '🟠', MISS: '🔴' }
 function makeTotals() {
-  return { HIT: 0, PARTIAL: 0, TYPE_MISMATCH: 0, MISS: 0, extras: 0, noise: 0, overCapture: 0, tokens: 0 }
+  return { HIT: 0, PARTIAL: 0, TYPE_MISMATCH: 0, MISS: 0, extras: 0, noise: 0, overCapture: 0, tokens: 0, anchored: 0 }
 }
 const totals = { dev: makeTotals(), holdout: makeTotals(), combined: makeTotals() }
 const extrasFlat = []
@@ -140,15 +96,27 @@ for (const [file, r] of Object.entries(report)) {
 
   for (const gr of r.goldResults) {
     for (const t of buckets) t[gr.status]++
+    // "Anchored occurrence coverage": HIT via a positionally-anchored match
+    // (ANCHOR, morphology-independent) or an exact norm() match (EXACT) —
+    // the two tiers strong enough to trust without any partial/jaccard
+    // fuzziness. Company-core / person-initials HITs don't count here even
+    // though they're also full HITs, since those rely on rule-based folding
+    // rather than a direct textual/positional match.
+    if (gr.status === 'HIT' && (gr.matchKind === 'anchor' || gr.matchKind === 'exact')) {
+      for (const t of buckets) t.anchored++
+    }
     const m = gr.matched
-    const detail = m ? `  <- [${m.type}] "${m.value}" (${gr.quality})` : ''
+    const detail = m ? `  <- [${m.type}] "${m.value}" (${gr.quality}${gr.matchKind ? `/${gr.matchKind}` : ''})` : ''
     console.log(`${ICON[gr.status]} ${gr.status.padEnd(13)} ${gr.gold.type.padEnd(11)} "${gr.gold.value}"${detail}`)
   }
   if (r.extras.length) {
     console.log('  -- extra (not in gold): --')
     for (const e of r.extras) {
       for (const t of buckets) t.extras++
-      console.log(`🔵 EXTRA          [${e.type}] "${e.value}" (x${e.count})`)
+      // detected now comes from res.scored (has `positions`, not a UI-rendered
+      // `count`), so derive an occurrence count from positions when present.
+      const occCount = e.count ?? (Array.isArray(e.positions) ? e.positions.length : '?')
+      console.log(`🔵 EXTRA          [${e.type}] "${e.value}" (x${occCount})`)
 
       const key = triageKey(file, e.type, e.value)
       const category = triage[key] === 'over-capture' ? 'over-capture' : 'noise'
@@ -161,7 +129,7 @@ for (const [file, r] of Object.entries(report)) {
         gold: r.contract,
         type: e.type,
         value: e.value,
-        count: e.count,
+        count: occCount,
         context: findContext(r.sourceText, e.value),
         category,
       })
@@ -189,11 +157,14 @@ function printSummary(label, t) {
   if (goldTotal) {
     const recall = (t.HIT + 0.5 * t.PARTIAL) / goldTotal
     const strict = t.HIT / goldTotal
+    const anchoredCoverage = t.anchored / goldTotal
     console.log(`DETECTION SCORE (recall, PARTIAL=0.5): ${(recall * 100).toFixed(1)}%`)
     console.log(`STRICT SCORE (full HITs only):        ${(strict * 100).toFixed(1)}%`)
+    console.log(`ANCHORED OCCURRENCE COVERAGE (ANCHOR/EXACT HITs only): ${(anchoredCoverage * 100).toFixed(1)}%`)
   } else {
     console.log('DETECTION SCORE (recall, PARTIAL=0.5): n/a')
     console.log('STRICT SCORE (full HITs only):        n/a')
+    console.log('ANCHORED OCCURRENCE COVERAGE (ANCHOR/EXACT HITs only): n/a')
   }
   console.log(`FALSE POSITIVES (extras): ${t.extras}`)
   console.log(`  of which: noise ${t.noise} / over-capture ${t.overCapture}`)
