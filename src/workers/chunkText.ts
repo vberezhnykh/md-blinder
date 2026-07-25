@@ -12,7 +12,9 @@ const HAS_ALNUM = /[\p{L}\p{N}]/u
 // word) can blow past 384 words → out-of-range quality + a slow chunk. So we cap
 // WORDS too, re-splitting any over-limit chunk with a word overlap. Same word
 // regex as gliner's (patched) splitter, so the count matches what the model sees.
-const WORD_RE = /[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*|\S/gu
+// Exported so nerBatching.ts can count words the same way without duplicating
+// the regex (and drifting from it silently).
+export const WORD_RE = /[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*|\S/gu
 const MAX_WORDS = 350
 const WORD_OVERLAP = 24
 

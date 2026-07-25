@@ -1,6 +1,7 @@
 import { Gliner } from 'gliner'
 import type { EntityType, RawMatch } from '../lib/anonymize/types'
 import { chunkText } from './chunkText'
+import { planBatches, expandBatchResult } from './nerBatching'
 import { pickExecutionProvider, type ExecProvider } from './pickEp'
 
 // Multilingual GLiNER (handles Russian + English, incl. bilingual docs). We use
@@ -187,34 +188,26 @@ self.onmessage = async (e: MessageEvent<InboundMessage>) => {
     // Batch several chunks per inference() call: one session.run over N texts
     // amortizes the per-call overhead (measured ~10% faster than one-at-a-time
     // on CPU; multi-threading didn't help because that overhead is per-call, not
-    // per-op). Offsets stay per-chunk (chunk.base), so results map back exactly.
-    for (let i = 0; i < chunks.length; i += NER_BATCH_SIZE) {
-      const batch = chunks.slice(i, i + NER_BATCH_SIZE)
+    // per-op). Identical chunks (repeated boilerplate phrases) are deduped down
+    // to one inference each via planBatches, and unique chunks are sorted by
+    // word count so a batch doesn't pad short chunks up to a rare long one.
+    // Offsets stay per-occurrence (occ.base), so dedup never merges positions.
+    const { batches, occurrences } = planBatches(chunks, NER_BATCH_SIZE)
+    let processed = 0
+    for (const batchTexts of batches) {
       const res = await gliner.inference({
-        texts: batch.map((c) => c.text),
+        texts: batchTexts,
         entities: labels,
         flatNer: true,
         threshold,
       })
-      batch.forEach((chunk, j) => {
-        const items = res[j] ?? []
-        for (const item of items) {
-          const type = mapLabel(item.label)
-          if (!type) continue
-          matches.push({
-            type,
-            value: item.spanText,
-            start: chunk.base + item.start,
-            end: chunk.base + item.end,
-            score: item.score,
-          })
-        }
-      })
+      matches.push(...expandBatchResult(batchTexts, res, occurrences, mapLabel))
+      for (const text of batchTexts) processed += occurrences.get(text)?.length ?? 0
       post({
         requestId,
         type: 'progress',
         stage: 'detect',
-        chunk: Math.min(i + NER_BATCH_SIZE, chunks.length),
+        chunk: Math.min(processed, chunks.length),
         chunks: chunks.length,
       })
     }

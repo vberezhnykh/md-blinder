@@ -32,9 +32,12 @@ for (const file of files) {
   console.error(`[start] (${fileIndex}/${files.length}) ${basename(file)}`)
   const page = await context.newPage()
   const errors = []
+  let nerTiming = null
   page.on('pageerror', (e) => errors.push(String(e)))
   page.on('console', (m) => {
-    if (m.type() === 'error') errors.push(m.text())
+    const t = m.text()
+    if (m.type() === 'error') errors.push(t)
+    if (t.includes('[ner] timing')) nerTiming = t // e.g. "[ner] timing EP=wasm chunks=35 nerMs=220694"
   })
 
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
@@ -154,6 +157,7 @@ for (const file of files) {
     finished,
     error: errText,
     nerNotice,
+    nerTiming,
     entities,
     candidates,
     sourceText,
