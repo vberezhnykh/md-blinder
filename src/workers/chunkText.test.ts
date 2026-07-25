@@ -79,6 +79,38 @@ describe('chunkText', () => {
     for (const c of chunks) expect(text.slice(c.base, c.base + c.text.length)).toBe(c.text)
   })
 
+  it('caps a word-dense chunk at ~350 words with overlap and correct offsets', () => {
+    // 400 short "words" in ~800 chars: one char-chunk (<1500) but >350 words,
+    // so capWords must re-split it.
+    const words = Array.from({ length: 400 }, (_, i) => `w${i}`)
+    const text = words.join(' ')
+
+    const chunks = chunkText(text)
+    const countWords = (s: string) => (s.match(/[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*|\S/gu) || []).length
+
+    expect(chunks.length).toBeGreaterThan(1)
+    for (const c of chunks) {
+      expect(countWords(c.text)).toBeLessThanOrEqual(350)
+      // offsets exact after word-splitting
+      expect(text.slice(c.base, c.base + c.text.length)).toBe(c.text)
+    }
+    // consecutive sub-chunks overlap (start of next is before end of current)
+    for (let i = 0; i < chunks.length - 1; i++) {
+      expect(chunks[i + 1].base).toBeLessThan(chunks[i].base + chunks[i].text.length)
+    }
+    // every word is covered somewhere (no gap)
+    expect(chunks.some((c) => c.text.startsWith('w0 '))).toBe(true)
+    expect(chunks.some((c) => c.text.endsWith('w399'))).toBe(true)
+  })
+
+  it('leaves an under-limit chunk untouched by the word cap', () => {
+    const text = Array.from({ length: 100 }, (_, i) => `слово${i}`).join(' ')
+    const chunks = chunkText(text)
+    expect(chunks.length).toBe(1)
+    expect(chunks[0].text).toBe(text)
+    expect(chunks[0].base).toBe(0)
+  })
+
   it('splits into separate chunks when paragraphs together exceed maxLen', () => {
     const paraA = makeFiller(1000)
     const paraB = makeFiller(1000)

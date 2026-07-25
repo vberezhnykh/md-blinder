@@ -6,6 +6,38 @@ const OVERLAP = 200
 // drop it before NER to save an ONNX call. Provably recall-safe.
 const HAS_ALNUM = /[\p{L}\p{N}]/u
 
+// GLiNER's word cost is O(words) spans and its transformer is O(words²)-ish, and
+// the model was trained at max_len=384. The 1500-char cap keeps prose well under
+// that, but a punctuation-dense chunk (tables: every «|»/«.»/«<br>» is its own
+// word) can blow past 384 words → out-of-range quality + a slow chunk. So we cap
+// WORDS too, re-splitting any over-limit chunk with a word overlap. Same word
+// regex as gliner's (patched) splitter, so the count matches what the model sees.
+const WORD_RE = /[\p{L}\p{N}_]+(?:[-_][\p{L}\p{N}_]+)*|\S/gu
+const MAX_WORDS = 350
+const WORD_OVERLAP = 24
+
+// Split one chunk into ≤MAX_WORDS-word sub-chunks (with WORD_OVERLAP-word overlap),
+// carrying correct base offsets. Chunks already under the limit pass through as-is.
+function capWords(chunk: { text: string; base: number }): { text: string; base: number }[] {
+  const words: { start: number; end: number }[] = []
+  WORD_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = WORD_RE.exec(chunk.text))) words.push({ start: m.index, end: m.index + m[0].length })
+  if (words.length <= MAX_WORDS) return [chunk]
+
+  const out: { text: string; base: number }[] = []
+  let i = 0
+  while (i < words.length) {
+    const endIdx = Math.min(i + MAX_WORDS, words.length)
+    const charStart = words[i].start
+    const charEnd = words[endIdx - 1].end
+    out.push({ text: chunk.text.slice(charStart, charEnd), base: chunk.base + charStart })
+    if (endIdx >= words.length) break
+    i = Math.max(endIdx - WORD_OVERLAP, i + 1)
+  }
+  return out
+}
+
 // Splits text into ≤maxLen chunks on paragraph boundaries, hard-splitting any
 // paragraph that alone exceeds maxLen. Each chunk carries `base`, its true
 // char offset in the original text, computed by re-slicing the source
@@ -58,7 +90,7 @@ export function chunkText(text: string, maxLen = 1500): { text: string; base: nu
     }
   }
   flush()
-  return chunks.filter((c) => HAS_ALNUM.test(c.text))
+  return chunks.filter((c) => HAS_ALNUM.test(c.text)).flatMap(capWords)
 }
 
 // Finds the best place to end a hard-split chunk within [offset, windowEnd]:
