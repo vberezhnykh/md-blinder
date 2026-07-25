@@ -65,6 +65,20 @@ describe('chunkText', () => {
     expect(chunks[0].base).toBe(0)
   })
 
+  it('drops chunks with no letters or digits (table/separator/underscore noise)', () => {
+    const noise = '| --- | --- |\n\n___________________\n\n| :-: | :-: |'
+    const para = 'Иван Петров подписал договор.'
+    const text = `${noise}\n\n${para}\n\n${noise}`
+
+    const chunks = chunkText(text)
+
+    // The noise-only chunks are gone; the real paragraph survives.
+    expect(chunks.some((c) => c.text.includes('Иван Петров'))).toBe(true)
+    for (const c of chunks) expect(/[\p{L}\p{N}]/u.test(c.text)).toBe(true)
+    // Surviving chunks still report correct base offsets.
+    for (const c of chunks) expect(text.slice(c.base, c.base + c.text.length)).toBe(c.text)
+  })
+
   it('splits into separate chunks when paragraphs together exceed maxLen', () => {
     const paraA = makeFiller(1000)
     const paraB = makeFiller(1000)

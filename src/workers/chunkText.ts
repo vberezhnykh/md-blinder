@@ -1,5 +1,11 @@
 const OVERLAP = 200
 
+// A chunk with no Unicode letter or digit (table-separator rows «|---|»,
+// signature-line underscores, pure punctuation) can't hold any entity —
+// PERSON/COMPANY/ADDRESS need letters, REG_NUMBER/ACCOUNT need digits — so we
+// drop it before NER to save an ONNX call. Provably recall-safe.
+const HAS_ALNUM = /[\p{L}\p{N}]/u
+
 // Splits text into ≤maxLen chunks on paragraph boundaries, hard-splitting any
 // paragraph that alone exceeds maxLen. Each chunk carries `base`, its true
 // char offset in the original text, computed by re-slicing the source
@@ -52,7 +58,7 @@ export function chunkText(text: string, maxLen = 1500): { text: string; base: nu
     }
   }
   flush()
-  return chunks
+  return chunks.filter((c) => HAS_ALNUM.test(c.text))
 }
 
 // Finds the best place to end a hard-split chunk within [offset, windowEnd]:
