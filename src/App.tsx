@@ -21,10 +21,6 @@ import './App.css'
 
 type Progress = UiProgress
 
-// Способы «вынести» анонимизированный текст из приложения. Оба проходят один и
-// тот же контроль полноты: копирование — такая же выгрузка, как скачивание.
-type ExportAction = 'download' | 'copy'
-
 // Стейджи конвейера анонимизации 1:1 ложатся на фазы индикатора — маппинг
 // оставлен явным, чтобы новый стейдж нельзя было забыть показать.
 function toProgress(p: AnonymizeProgress): Progress {
@@ -61,11 +57,7 @@ function App() {
   const [secondPassRunning, setSecondPassRunning] = useState(false)
   const [secondPassInfo, setSecondPassInfo] = useState<string | null>(null)
   const [lastSecondPassAt, setLastSecondPassAt] = useState<number | null>(null)
-  // action помнит, что именно пользователь просил — скачать файл или скопировать
-  // текст: подтверждение в диалоге должно продолжить именно это действие.
-  const [exportGate, setExportGate] = useState<
-    (ExportGate & { passAt: number; action: ExportAction }) | null
-  >(null)
+  const [exportGate, setExportGate] = useState<(ExportGate & { passAt: number }) | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
   const gateDialogRef = useRef<HTMLDialogElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -297,18 +289,15 @@ function App() {
     URL.revokeObjectURL(url)
   }, [anonymizedText, fileName])
 
-  const performCopy = useCallback(async () => {
+  // Копирование мгновенное: никакого контрольного прохода и подтверждений
+  // перед ним. Это осознанный размен — B5-гейт остаётся только на экспорте .md
+  // (файл уходит наружу и живёт дальше), а копирование в буфер задумано как
+  // быстрое действие «взял текст и вставил». Непросмотренные кандидаты после
+  // копирования показываются подсказкой, не блокируя.
+  const handleCopy = useCallback(async () => {
     const ok = await copyText(anonymizedText)
     setCopyState(ok ? 'copied' : 'error')
   }, [anonymizedText])
-
-  const performAction = useCallback(
-    (action: ExportAction) => {
-      if (action === 'copy') void performCopy()
-      else performMdExport()
-    },
-    [performCopy, performMdExport],
-  )
 
   // Ответ на копирование держим пару секунд и гасим; при любой правке текста
   // сбрасываем сразу — «Скопировано» про старую версию текста вводит в заблуждение.
@@ -322,25 +311,17 @@ function App() {
     return () => clearTimeout(id)
   }, [copyState])
 
-  // B5: перед выгрузкой всегда прогоняем контрольную проверку — если остались
-  // непросмотренные кандидаты «серой зоны», блокируем мягким подтверждением.
-  // Копирование идёт тем же путём: в буфер уходит ровно тот же текст, что и в
-  // файл, поэтому пропуск ПД тут стоит столько же.
-  const handleExport = async (action: ExportAction) => {
+  // B5: перед экспортом всегда прогоняем контрольную проверку — если остались
+  // непросмотренные кандидаты «серой зоны», блокируем скачивание мягким подтверждением
+  const handleExport = async () => {
     const found = await runControlPass()
     const gate = computeExportGate(entities)
     const unreviewed = gate.unreviewed + found
     if (unreviewed > 0) {
-      setExportGate({
-        replaced: gate.replaced,
-        unreviewed,
-        needsConfirm: true,
-        passAt: Date.now(),
-        action,
-      })
+      setExportGate({ replaced: gate.replaced, unreviewed, needsConfirm: true, passAt: Date.now() })
       return
     }
-    performAction(action)
+    performMdExport()
   }
 
   // B5: управляем нативным <dialog> как модалкой (backdrop + Esc) через showModal/close
@@ -422,6 +403,9 @@ function App() {
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
   const activeCount = entities.filter((e) => e.anonymize).length
+  // Считается мгновенно (обычный фильтр по сущностям, без NER) — годится для
+  // подсказки сразу после копирования.
+  const unreviewedCount = computeExportGate(entities).unreviewed
   const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
 
   return (
@@ -551,14 +535,13 @@ function App() {
               <button type="button" onClick={() => void runControlPass()} disabled={secondPassRunning || isLoading}>
                 {secondPassRunning ? 'Проверка…' : 'Контрольная проверка'}
               </button>
-              <button type="button" onClick={() => void handleExport('download')} disabled={secondPassRunning}>
+              <button type="button" onClick={() => void handleExport()} disabled={secondPassRunning}>
                 Экспортировать .md
               </button>
               <button
                 type="button"
                 className="copy-action"
-                onClick={() => void handleExport('copy')}
-                disabled={secondPassRunning}
+                onClick={() => void handleCopy()}
                 aria-live="polite"
               >
                 {copyState === 'copied'
@@ -574,6 +557,16 @@ function App() {
               )}
             </div>
           </div>
+
+          {/* Копирование не блокируется контрольной проверкой, поэтому о
+              непросмотренных кандидатах сообщаем постфактум — подсказкой. */}
+          {copyState === 'copied' && unreviewedCount > 0 && (
+            <p className="status-hint">
+              Текст скопирован. Непросмотренных кандидатов «серой зоны»: <b>{unreviewedCount}</b> —
+              они не заменены. Проверьте секцию «Проверьте вручную» или запустите контрольную
+              проверку.
+            </p>
+          )}
 
           {view === 'editor' ? (
             <div className="editor-layout">
@@ -619,8 +612,7 @@ function App() {
             <h3>Проверьте полноту анонимизации</h3>
             <p>
               Остались непросмотренные кандидаты «серой зоны» — они не заменяются автоматически.
-              Просмотрите их в секции «Проверьте вручную» или{' '}
-              {exportGate.action === 'copy' ? 'скопируйте' : 'экспортируйте'} как есть.
+              Просмотрите их в секции «Проверьте вручную» или экспортируйте как есть.
             </p>
             <ul className="export-gate-stats">
               <li>Заменяется сущностей: <b>{exportGate.replaced}</b></li>
@@ -631,14 +623,8 @@ function App() {
               <button type="button" className="secondary" onClick={() => setExportGate(null)}>
                 Вернуться к проверке
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  performAction(exportGate.action)
-                  setExportGate(null)
-                }}
-              >
-                {exportGate.action === 'copy' ? 'Скопировать всё равно' : 'Экспортировать всё равно'}
+              <button type="button" onClick={() => { performMdExport(); setExportGate(null) }}>
+                Экспортировать всё равно
               </button>
             </footer>
           </article>
