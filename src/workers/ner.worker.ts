@@ -1,8 +1,9 @@
 import { Gliner } from 'gliner'
 import type { EntityType, RawMatch } from '../lib/anonymize/types'
 import { chunkText } from './chunkText'
-import { planBatches, expandBatchResult } from './nerBatching'
+import { planBatches, expandBatchResult, countWords } from './nerBatching'
 import { pickExecutionProvider, type ExecProvider } from './pickEp'
+import type { NerProgress } from './nerProgress'
 
 // Multilingual GLiNER (handles Russian + English, incl. bilingual docs). We use
 // the fp16 model on BOTH execution providers. The int8 quantized and q4f16
@@ -29,8 +30,7 @@ interface InboundMessage {
 }
 
 type OutboundMessage =
-  | { requestId: string; type: 'progress'; stage: 'load'; pct: number }
-  | { requestId: string; type: 'progress'; stage: 'detect'; chunk: number; chunks: number }
+  | ({ requestId: string; type: 'progress' } & NerProgress)
   | { requestId: string; type: 'done'; matches: RawMatch[] }
   | { requestId: string; type: 'error'; error: string }
 
@@ -38,17 +38,27 @@ function post(m: OutboundMessage) {
   self.postMessage(m)
 }
 
+const MB = 1024 * 1024
+function fmtMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
+}
+
 // Downloads the ONNX model with progress reporting, caching it in Cache
 // Storage so subsequent runs (and offline use) skip the network entirely.
-async function loadModelBytes(modelUrl: string, onPct: (pct: number) => void): Promise<Uint8Array> {
+// Возвращает ещё и признак «взято из кеша»: чтение 580 МБ из Cache Storage —
+// это тоже секунды, и пользователю полезно видеть, что сети тут уже нет.
+async function loadModelBytes(
+  modelUrl: string,
+  onPct: (pct: number, cached: boolean) => void,
+): Promise<{ bytes: Uint8Array; cached: boolean }> {
   let cache: Cache | null = null
   try {
     cache = await caches.open(CACHE_NAME)
     const cached = await cache.match(modelUrl)
     if (cached) {
       const buf = await cached.arrayBuffer()
-      onPct(100)
-      return new Uint8Array(buf)
+      onPct(100, true)
+      return { bytes: new Uint8Array(buf), cached: true }
     }
   } catch {
     cache = null
@@ -69,7 +79,7 @@ async function loadModelBytes(modelUrl: string, onPct: (pct: number) => void): P
       if (done) break
       chunks.push(value)
       received += value.length
-      if (total > 0) onPct(Math.round((received / total) * 100))
+      if (total > 0) onPct(Math.round((received / total) * 100), false)
     }
     bytes = new Uint8Array(received)
     let offset = 0
@@ -89,13 +99,18 @@ async function loadModelBytes(modelUrl: string, onPct: (pct: number) => void): P
     }
   }
 
-  onPct(100)
-  return bytes
+  onPct(100, false)
+  return { bytes, cached: false }
 }
 
 let glinerPromise: Promise<Gliner> | null = null
 // Set once getGliner resolves; used only for the NER timing log below.
 let activeEp: ExecProvider = 'wasm'
+// Тайминги одноразовой инициализации (модель живёт в модуле, второй запрос их
+// не платит) — печатаются в итоговой строке, чтобы было видно, что 65 секунд
+// это не «инференс тормозит», а download+session+warmup+inference по частям.
+let loadTiming: { downloadMs: number; initMs: number; warmupMs: number; cached: boolean } | null =
+  null
 
 // Whether a usable WebGPU adapter can actually be acquired (not just present).
 async function webgpuHasAdapter(): Promise<boolean> {
@@ -120,9 +135,21 @@ function getGliner(requestId: string): Promise<Gliner> {
       // fp16 on whichever EP we run (GPU or CPU), then builds + warms up GLiNER
       // so any runtime failure surfaces here (→ fallback).
       async function buildGliner(ep: ExecProvider): Promise<Gliner> {
-        const modelBytes = await loadModelBytes(MODEL_URL_FP16, (pct) =>
-          post({ requestId, type: 'progress', stage: 'load', pct }),
+        const t0 = performance.now()
+        const { bytes: modelBytes, cached } = await loadModelBytes(MODEL_URL_FP16, (pct, fromCache) =>
+          post({ requestId, type: 'progress', stage: 'download', pct, cached: fromCache }),
         )
+        const downloadMs = performance.now() - t0
+        console.log(
+          `[ner] модель ${(modelBytes.length / MB).toFixed(0)} МБ ${cached ? 'из кеша' : 'скачана'} за ${fmtMs(downloadMs)}`,
+        )
+
+        // Создание ONNX-сессии — самая «тихая» фаза: onnxruntime парсит и
+        // оптимизирует граф на 580 МБ (именно здесь сыпятся warning'и вида
+        // «Failed to find kernel for ReduceMean» — это шум оптимизатора, не
+        // ошибка), и на CPU это десятки секунд без единого события.
+        post({ requestId, type: 'progress', stage: 'init', ep })
+        const t1 = performance.now()
         const gliner = new Gliner({
           tokenizerPath: 'onnx-community/gliner_multi-v2.1',
           onnxSettings: {
@@ -133,8 +160,17 @@ function getGliner(requestId: string): Promise<Gliner> {
           transformersSettings: { allowLocalModels: false, useBrowserCache: true },
         })
         await gliner.initialize()
+        const initMs = performance.now() - t1
+        console.log(`[ner] сессия ONNX (${ep}) создана за ${fmtMs(initMs)}`)
+
         // Force GPU kernel init and surface runtime errors immediately.
+        post({ requestId, type: 'progress', stage: 'warmup', ep })
+        const t2 = performance.now()
         await gliner.inference({ texts: ['John Smith'], entities: ['person'], flatNer: true, threshold: 0.5 })
+        const warmupMs = performance.now() - t2
+        console.log(`[ner] прогрев (${ep}) за ${fmtMs(warmupMs)}`)
+
+        loadTiming = { downloadMs: Math.round(downloadMs), initMs: Math.round(initMs), warmupMs: Math.round(warmupMs), cached }
         return gliner
       }
 
@@ -180,6 +216,7 @@ function mapLabel(label: string): EntityType | null {
 self.onmessage = async (e: MessageEvent<InboundMessage>) => {
   const { requestId, text, labels, threshold } = e.data
   try {
+    const reqStart = performance.now()
     const gliner = await getGliner(requestId)
     const chunks = chunkText(text)
     const matches: RawMatch[] = []
@@ -194,26 +231,70 @@ self.onmessage = async (e: MessageEvent<InboundMessage>) => {
     // Offsets stay per-occurrence (occ.base), so dedup never merges positions.
     const { batches, occurrences } = planBatches(chunks, NER_BATCH_SIZE)
     let processed = 0
-    for (const batchTexts of batches) {
+    for (let b = 0; b < batches.length; b++) {
+      const batchTexts = batches[b]
+      // Сколько вхождений (с учётом дублей) закроет этот батч — прогресс
+      // отдаётся ДО инференса, иначе на коротком документе (1 батч) индикатор
+      // стоит на нуле всё время счёта и выглядит как зависание.
+      const batchChunks = batchTexts.reduce((n, t) => n + (occurrences.get(t)?.length ?? 0), 0)
+      const batchWords = batchTexts.reduce((n, t) => n + countWords(t), 0)
+      post({
+        requestId,
+        type: 'progress',
+        stage: 'detect',
+        ep: activeEp,
+        chunk: Math.min(processed, chunks.length),
+        chunks: chunks.length,
+        batch: b + 1,
+        batches: batches.length,
+        batchChunks,
+        elapsedMs: Math.round(performance.now() - reqStart),
+      })
+
+      const bStart = performance.now()
       const res = await gliner.inference({
         texts: batchTexts,
         entities: labels,
         flatNer: true,
         threshold,
       })
+      const batchMs = performance.now() - bStart
       matches.push(...expandBatchResult(batchTexts, res, occurrences, mapLabel))
-      for (const text of batchTexts) processed += occurrences.get(text)?.length ?? 0
+      processed += batchChunks
+      console.log(
+        `[ner] батч ${b + 1}/${batches.length}: ${batchTexts.length} уник. текстов ` +
+          `(${batchChunks} чанк(ов), ${batchWords} слов) за ${fmtMs(batchMs)} ` +
+          `— ${Math.round(batchMs / Math.max(batchWords, 1))} мс/слово`,
+      )
+
       post({
         requestId,
         type: 'progress',
         stage: 'detect',
+        ep: activeEp,
         chunk: Math.min(processed, chunks.length),
         chunks: chunks.length,
+        batch: b + 1,
+        batches: batches.length,
+        batchChunks,
+        elapsedMs: Math.round(performance.now() - reqStart),
       })
     }
 
     const nerMs = Math.round(performance.now() - nerStart)
-    console.log(`[ner] timing EP=${activeEp} chunks=${chunks.length} nerMs=${nerMs}`)
+    const totalMs = Math.round(performance.now() - reqStart)
+    const perChunk = Math.round(nerMs / Math.max(chunks.length, 1))
+    console.log(
+      `[ner] итого EP=${activeEp} chunks=${chunks.length} (уник. ${occurrences.size}, батчей ${batches.length}) ` +
+        `nerMs=${nerMs} (${perChunk} мс/чанк) totalMs=${totalMs}` +
+        (loadTiming
+          ? ` | загрузка: download=${loadTiming.downloadMs}ms${loadTiming.cached ? ' (кеш)' : ''} ` +
+            `session=${loadTiming.initMs}ms warmup=${loadTiming.warmupMs}ms`
+          : ' | загрузка: (модель уже была готова)'),
+    )
+    // Тайминги загрузки платятся один раз на воркер: гасим, чтобы во втором
+    // документе они не выглядели как заново потраченное время.
+    loadTiming = null
 
     post({ requestId, type: 'done', matches })
   } catch (err) {

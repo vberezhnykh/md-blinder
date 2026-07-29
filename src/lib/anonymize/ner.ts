@@ -1,17 +1,12 @@
 import type { RawMatch } from './types'
 import { stripInlineFormatting, remapMatches } from './stripFormatting'
 import { NER_GRAY_ZONE_LOW } from './config'
+import type { NerProgress } from '../../workers/nerProgress'
 
-export interface NerProgress {
-  stage: 'load' | 'detect'
-  pct?: number
-  chunk?: number
-  chunks?: number
-}
+export type { NerProgress, NerStage } from '../../workers/nerProgress'
 
 type WorkerOutbound =
-  | { requestId: string; type: 'progress'; stage: 'load'; pct: number }
-  | { requestId: string; type: 'progress'; stage: 'detect'; chunk: number; chunks: number }
+  | ({ requestId: string; type: 'progress' } & NerProgress)
   | { requestId: string; type: 'done'; matches: RawMatch[] }
   | { requestId: string; type: 'error'; error: string }
 
@@ -30,11 +25,8 @@ function handleMessage(e: MessageEvent<WorkerOutbound>) {
   if (!req) return
 
   if (data.type === 'progress') {
-    if (data.stage === 'load') {
-      req.onProgress?.({ stage: 'load', pct: data.pct })
-    } else {
-      req.onProgress?.({ stage: 'detect', chunk: data.chunk, chunks: data.chunks })
-    }
+    const { requestId: _id, type: _type, ...progress } = data
+    req.onProgress?.(progress)
     return
   }
 

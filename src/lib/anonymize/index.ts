@@ -7,10 +7,16 @@ import { NER_CONFIRM_THRESHOLD, NER_GRAY_ZONE_LOW } from './config'
 import type { AnonymizationResult, Entity, EntityType, RawMatch } from './types'
 
 export interface AnonymizeProgress {
-  stage: 'regex' | 'ner-load' | 'ner-detect'
+  stage: 'regex' | 'ner-download' | 'ner-init' | 'ner-warmup' | 'ner-detect'
   pct?: number
+  cached?: boolean
+  ep?: 'webgpu' | 'wasm'
   chunk?: number
   chunks?: number
+  batch?: number
+  batches?: number
+  batchChunks?: number
+  elapsedMs?: number
 }
 
 export function normalizeValue(type: EntityType, value: string): string {
@@ -82,12 +88,7 @@ export async function anonymizeMarkdown(
   let nerFailed = false
   try {
     ner = await detectEntitiesNer(markdown, (p) =>
-      onProgress?.({
-        stage: p.stage === 'load' ? 'ner-load' : 'ner-detect',
-        pct: p.pct,
-        chunk: p.chunk,
-        chunks: p.chunks,
-      }),
+      onProgress?.({ ...p, stage: `ner-${p.stage}` as AnonymizeProgress['stage'] }),
     )
   } catch {
     nerFailed = true

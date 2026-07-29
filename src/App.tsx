@@ -9,6 +9,7 @@ import { entitiesToCsv } from './lib/anonymize/csv'
 import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
+import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDoc } from './lib/history'
 import ReplacementTable from './components/ReplacementTable'
@@ -17,39 +18,23 @@ import EntityList from './components/EntityList'
 import HistoryPanel from './components/HistoryPanel'
 import './App.css'
 
-type Progress = {
-  phase: 'pdf' | 'ocr' | 'regex' | 'ner-load' | 'ner-detect'
-  page?: number
-  total?: number
-  pct?: number
-  chunk?: number
-  chunks?: number
-}
+type Progress = UiProgress
 
+// Стейджи конвейера анонимизации 1:1 ложатся на фазы индикатора — маппинг
+// оставлен явным, чтобы новый стейдж нельзя было забыть показать.
 function toProgress(p: AnonymizeProgress): Progress {
   if (p.stage === 'regex') return { phase: 'regex' }
-  if (p.stage === 'ner-load') return { phase: 'ner-load', pct: p.pct }
-  return { phase: 'ner-detect', chunk: p.chunk, chunks: p.chunks }
-}
-
-function statusLabel(progress: Progress | null): string {
-  if (!progress) return 'Обработка файла…'
-  if (progress.phase === 'pdf') {
-    return `Извлечение текста из PDF… (страница ${progress.page}/${progress.total})`
+  return {
+    phase: p.stage,
+    pct: p.pct,
+    cached: p.cached,
+    ep: p.ep,
+    chunk: p.chunk,
+    chunks: p.chunks,
+    batch: p.batch,
+    batches: p.batches,
+    batchChunks: p.batchChunks,
   }
-  if (progress.phase === 'ocr') {
-    if (progress.page === 0) {
-      return `Загрузка OCR-модели… ${progress.pct ?? 0}%`
-    }
-    return `Распознавание скана (OCR)… страница ${progress.page}/${progress.total} — ${progress.pct ?? 0}%`
-  }
-  if (progress.phase === 'regex') {
-    return 'Поиск структурных данных…'
-  }
-  if (progress.phase === 'ner-load') {
-    return `Загрузка NER-модели… ${progress.pct ?? 0}%`
-  }
-  return `Поиск чувствительных данных… (фрагмент ${progress.chunk}/${progress.chunks})`
 }
 
 function App() {
@@ -64,6 +49,9 @@ function App() {
   const [error, setError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
+  // Секунды с начала обработки. Фазы NER на CPU идут по 10–40 секунд без
+  // процентов — тикающий таймер единственный признак, что ничего не зависло.
+  const [elapsedSec, setElapsedSec] = useState(0)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
   const [secondPassRunning, setSecondPassRunning] = useState(false)
   const [secondPassInfo, setSecondPassInfo] = useState<string | null>(null)
@@ -85,6 +73,17 @@ function App() {
   useEffect(() => {
     refreshHistory()
   }, [refreshHistory])
+
+  useEffect(() => {
+    if (status !== 'loading') {
+      setElapsedSec(0)
+      return
+    }
+    const startedAt = Date.now()
+    setElapsedSec(0)
+    const id = setInterval(() => setElapsedSec(Math.round((Date.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [status])
 
   const anonymizedText = useMemo(
     () => buildAnonymizedText(sourceText, entities),
@@ -254,9 +253,9 @@ function App() {
     setSecondPassInfo(null)
     try {
       const found = await runSecondPass(sourceText, entities, (p) =>
-        setSecondPassInfo(p.stage === 'load'
-          ? `Контрольная проверка: загрузка модели… ${p.pct ?? 0}%`
-          : `Контрольная проверка: поиск… фрагмент ${p.chunk ?? 0}/${p.chunks ?? 0}`),
+        setSecondPassInfo(
+          `Контрольная проверка — ${statusLabel({ ...p, phase: `ner-${p.stage}` } as UiProgress)}`,
+        ),
       )
       const combined = [...entities, ...found]
       const related = findRelatedOccurrences(sourceText, combined)
@@ -455,15 +454,11 @@ function App() {
 
       {status === 'loading' && (
         <>
-          <p className="status status-loading">
+          <p className="status status-loading" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
-            {statusLabel(progress)}
+            {statusLabel(progress, elapsedSec)}
           </p>
-          {progress?.phase === 'ocr' && (
-            <p className="status-hint">
-              OCR медленный — распознавание может занять несколько минут.
-            </p>
-          )}
+          {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
         </>
       )}
       {status === 'error' && <p className="status error">{error}</p>}
