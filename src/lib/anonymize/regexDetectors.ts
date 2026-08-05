@@ -136,6 +136,15 @@ function isCepLike(s: string): boolean {
   return /^\d{2}\.\d{3}-\d{3}$/.test(s.trim())
 }
 
+// СНИЛС «123-456-789 01» по форме неотличим от телефона: 11 цифр с
+// разделителями, мимо всех фильтров detectPhone. detectSnils отдаёт РОВНО тот же
+// спан, а при совпадающих границах resolveOverlaps разруливал бы конфликт
+// порядком элементов в массиве — то есть случайно. Гасим здесь явно, тем же
+// приёмом, что даты и CEP.
+function isSnilsLike(s: string): boolean {
+  return /^\d{3}-\d{3}-\d{3}[\s-]\d{2}$/.test(s.trim())
+}
+
 const PHONE_LABEL_SRC = 'tel|telephone|phone|mobile|cell|fax'
 
 // Метка телефона непосредственно перед кандидатом (в пределах ~10 символов слева) —
@@ -179,6 +188,7 @@ function detectPhone(text: string): RawMatch[] {
     const raw = m[0]
     if (isDateLike(raw)) continue
     if (isCepLike(raw)) continue
+    if (isSnilsLike(raw)) continue
     const digits = raw.replace(/\D/g, '')
     if (digits.length < 7 || digits.length > 15) continue
     if (looksLikeMoneySum(raw, text, m.index)) continue
@@ -528,6 +538,221 @@ function detectRussianAccounts(text: string): RawMatch[] {
   return matches
 }
 
+// СНИЛС — 11 цифр, канонично «123-456-789 01». Два пути: по метке (тогда
+// принимаем и слитную запись) и по самому дефисному формату, который достаточно
+// специфичен, чтобы стоять без метки.
+//
+// Контрольную сумму не проверяем — та же логика, что и с CNPJ выше: формат и так
+// узкий, а сверка контрольного числа резала бы recall на номерах с опечатками и
+// ошибками OCR. Для анонимизации ложноположительное срабатывание дешевле пропуска.
+//
+// Тип REG_NUMBER, а не отдельный: СНИЛС стоит в одном ряду с ИНН физлица, ІПН и
+// РНОКПП, которые уже размечаются так же.
+function detectSnils(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+  const consumed: { start: number; end: number }[] = []
+
+  const labelledRe = new RegExp(
+    NOT_LETTER_BEFORE + 'СНИЛС' + NOT_LETTER_AFTER +
+      '[\\s:№#.-]*(\\d{3}\\s?-\\s?\\d{3}\\s?-\\s?\\d{3}[\\s-]?\\d{2}|\\d{11})(?!\\d)',
+    'gi',
+  )
+  let m: RegExpExecArray | null
+  while ((m = labelledRe.exec(text))) {
+    const group = m[1]
+    const start = m.index + m[0].indexOf(group)
+    const end = start + group.length
+    matches.push({ type: 'REG_NUMBER', value: group, start, end })
+    consumed.push({ start, end })
+  }
+
+  // Голый дефисный формат без метки. Не берём слитные 11 цифр — они неотличимы
+  // от телефона и любого другого длинного числа.
+  const bareRe = /(?<!\d)\d{3}-\d{3}-\d{3}[\s-]\d{2}(?!\d)/g
+  while ((m = bareRe.exec(text))) {
+    const start = m.index
+    const end = start + m[0].length
+    if (consumed.some((c) => start < c.end && c.start < end)) continue
+    matches.push({ type: 'REG_NUMBER', value: m[0], start, end })
+  }
+
+  return matches
+}
+
+// Слова, которые допустимо встретить между меткой «паспорт» и самим номером.
+// Всё, чего здесь нет, обрывает разбор — так «паспорт сделки», «паспорт
+// объекта», «паспорт качества» не превращаются в персональные данные.
+const PASSPORT_FILLER_WORDS = new Set([
+  'серия', 'серии', 'серию', 'сер', 'серія', 'серії', 'номер', 'номера', 'нр',
+  'no', 'nr', 'number', 'series', 'id', 'док', 'документ',
+  'гражданина', 'гражданки', 'громадянина', 'громадянки',
+  'рф', 'рб', 'россии', 'российской', 'федерации', 'украины', 'україни',
+  'казахстана', 'республики', 'беларусь', 'узбекистана', 'таджикистана',
+])
+
+// Определения, после которых «паспорт» означает документ на вещь, а не на
+// человека. Метка ловится вместе с ними (они стоят ПЕРЕД словом, поэтому
+// разбором «что идёт после метки» не отсекаются).
+const PASSPORT_NOT_ID_BEFORE =
+  /(?:техническ|кадастров|санитарн|ветеринарн|энергетическ|качеств|безопасност|заводск|электронн)\p{L}*\s+$/iu
+
+// Паспорта. Единственный надёжный якорь — метка: номер паспорта почти в любой
+// стране это просто буквенно-цифровая строка, и детектор «по форме» собрал бы
+// половину документа. Поэтому разбор всегда начинается со слова
+// «паспорт»/«passport», а значение берётся из того, что идёт следом.
+//
+// Разбираем не одним мега-регексом, а сканом токенов после метки: это даёт
+// поддержку любой страны без перечисления форматов и, главное, корректно ведёт
+// себя с разорванной записью. «паспорт 4506 123456» — один спан на обе группы;
+// «паспорт серия 4506 номер 123456» — два отдельных спана, слово «номер» между
+// ними остаётся в тексте, а не уезжает под плейсхолдер.
+//
+// Дата и орган выдачи («выдан 12.05.2010 ОВД…») в спан не попадают: «выдан» не
+// служебное слово, скан на нём останавливается.
+function detectPassport(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+
+  const labelRe =
+    /(?<!\p{L})(?:закордонн\p{L}*\s+|заграничн\p{L}*\s+|загран)?(?:паспорт\p{L}*|passport)(?!\p{L})/giu
+  let lm: RegExpExecArray | null
+  while ((lm = labelRe.exec(text))) {
+    if (PASSPORT_NOT_ID_BEFORE.test(text.slice(Math.max(0, lm.index - 24), lm.index))) continue
+
+    const windowStart = lm.index + lm[0].length
+    const window = text.slice(windowStart, windowStart + 70)
+
+    // Токены: число (возможно с внутренними пробелами), слово, разделитель.
+    const tokenRe = /(\d[\d\s]*\d|\d)|(\p{L}+)|([:№#.,/\\-]+)|(\S)/gu
+    const runs: { start: number; end: number }[] = []
+    let digitCount = 0
+    let pendingPrefix: { start: number; end: number } | null = null
+    let t: RegExpExecArray | null
+    while ((t = tokenRe.exec(window))) {
+      const [raw, digits, word, sep] = t
+      if (sep) {
+        pendingPrefix = null
+        continue
+      }
+      if (word) {
+        // Короткая ЗАГЛАВНАЯ группа букв перед цифрами — буквенная серия
+        // (украинский «АВ 123456», загранпаспорта). Держим её до следующего
+        // токена: если дальше цифры, она войдёт в спан, иначе разбор оборвётся.
+        if (/^[A-ZА-ЯЁІЇЄҐ]{1,3}$/u.test(raw)) {
+          pendingPrefix = { start: t.index, end: t.index + raw.length }
+          continue
+        }
+        if (PASSPORT_FILLER_WORDS.has(raw.toLowerCase())) {
+          pendingPrefix = null
+          continue
+        }
+        break
+      }
+      if (digits) {
+        const trimmed = raw.trimEnd()
+        const start = pendingPrefix ? pendingPrefix.start : t.index
+        const end = t.index + trimmed.length
+        digitCount += trimmed.replace(/\D/g, '').length
+        // Смежные группы («4506 123456») склеиваем в один спан: между ними
+        // только пробел, значит это одна запись номера.
+        const last = runs[runs.length - 1]
+        if (last && !pendingPrefix && window.slice(last.end, t.index).trim() === '') {
+          last.end = end
+        } else {
+          runs.push({ start, end })
+        }
+        pendingPrefix = null
+        if (runs.length >= 3) break
+        continue
+      }
+      break
+    }
+
+    // Слишком короткое число после метки («паспорт № 5») — это не номер паспорта.
+    if (digitCount < 6) continue
+    for (const r of runs) {
+      matches.push({
+        type: 'PASSPORT',
+        value: window.slice(r.start, r.end),
+        start: windowStart + r.start,
+        end: windowStart + r.end,
+      })
+    }
+  }
+
+  // Код подразделения — часть паспортных данных, метка однозначная.
+  const subdivisionRe = /(?<!\p{L})код\s+подразделения(?!\p{L})[\s:№#.-]*(\d{3}\s?-?\s?\d{3})(?!\d)/giu
+  let sm: RegExpExecArray | null
+  while ((sm = subdivisionRe.exec(text))) {
+    const group = sm[1]
+    const start = sm.index + sm[0].indexOf(group)
+    matches.push({ type: 'PASSPORT', value: group, start, end: start + group.length })
+  }
+
+  return matches
+}
+
+// Домены верхнего уровня для «голых» адресов без схемы и без www. Список, а не
+// «любые 2-24 буквы»: иначе детектор принимает за сайт имена файлов
+// («приложение.doc», «акт.pdf») и сокращения с точкой.
+const URL_TLDS =
+  'com|net|org|ru|su|ua|by|kz|kg|uz|am|az|ge|md|lv|lt|ee|uk|de|fr|es|it|nl|be|at|ch|pl|cz|sk|hu|ro|bg|rs|si|hr|gr|pt|se|no|fi|dk|ie|tr|il|ae|sa|cn|jp|kr|in|sg|hk|us|ca|mx|br|au|nz|za|eu|io|co|me|tv|cc|ws|info|biz|pro|name|online|site|store|shop|tech|app|dev|cloud|group|agency|legal|law|digital|media|team|world|space|website|link|xyz'
+
+const URL_DOMAIN_SRC = `[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9-]{1,63})*\\.(?:${URL_TLDS})`
+const URL_PATH_SRC = '(?:/[^\\s<>()\\[\\]"\'«»]*)?'
+
+// Сайты. Три уровня уверенности, от самого надёжного к самому рискованному:
+// схема (https://…), префикс www., и наконец голый домен по списку TLD.
+//
+// У голого домена есть дополнительное условие — он должен быть записан в
+// исходнике строчными буквами. Это дёшево отсекает случайные совпадения вроде
+// «Ltd.Co» и «АО.Ру», не трогая реальные адреса: в реквизитах их пишут строчными.
+// Цена — пропуск «Example.com» с заглавной в начале предложения; такие случаи
+// добираются меткой («Сайт: Example.com») и серой зоной.
+//
+// Почтовые адреса не задеваются: lookbehind отсекает позицию после «@», а даже
+// если бы совпало — EMAIL начинается раньше и выигрывает в resolveOverlaps.
+function detectWebsite(text: string): RawMatch[] {
+  const matches: RawMatch[] = []
+  const consumed: { start: number; end: number }[] = []
+
+  const push = (raw: string, rawStart: number) => {
+    // Хвостовая пунктуация — часть предложения, а не адреса.
+    const value = raw.replace(/[.,;:!?)»"'\]]+$/, '')
+    if (!value) return
+    const start = rawStart
+    const end = start + value.length
+    if (consumed.some((c) => start < c.end && c.start < end)) return
+    matches.push({ type: 'URL', value, start, end })
+    consumed.push({ start, end })
+  }
+
+  const schemeRe = /(?<![\w@])https?:\/\/[^\s<>()[\]"'«»]+/gi
+  let m: RegExpExecArray | null
+  while ((m = schemeRe.exec(text))) push(m[0], m.index)
+
+  const wwwRe = new RegExp(`(?<![\\w@./-])www\\.[a-z0-9-]+(?:\\.[a-z0-9-]+)+${URL_PATH_SRC}`, 'gi')
+  while ((m = wwwRe.exec(text))) push(m[0], m.index)
+
+  // По метке — регистр значения уже неважен, метка сама по себе достаточный сигнал.
+  const labelledRe = new RegExp(
+    `(?<!\\p{L})(?:веб-?сайт|сайт|website|web-?site|url|домен)(?!\\p{L})[\\s:№#-]*` +
+      `((?:https?://)?${URL_DOMAIN_SRC}${URL_PATH_SRC})(?![\\w-])`,
+    'giu',
+  )
+  while ((m = labelledRe.exec(text))) {
+    const group = m[1]
+    push(group, m.index + m[0].indexOf(group))
+  }
+
+  const bareRe = new RegExp(`(?<![\\w@./-])${URL_DOMAIN_SRC}${URL_PATH_SRC}(?![\\w-])`, 'gi')
+  while ((m = bareRe.exec(text))) {
+    if (m[0] !== m[0].toLowerCase()) continue
+    push(m[0], m.index)
+  }
+
+  return matches
+}
+
 export function detectStructural(text: string): RawMatch[] {
   return [
     ...detectEmail(text),
@@ -535,6 +760,9 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectRussianIds(text),
     ...detectRussianAccounts(text),
     ...detectUkrainianIds(text),
+    ...detectSnils(text),
+    ...detectPassport(text),
+    ...detectWebsite(text),
     ...detectCard(text),
     ...detectSwift(text),
     ...detectPhone(text),

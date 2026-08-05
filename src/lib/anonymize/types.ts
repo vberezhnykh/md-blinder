@@ -1,10 +1,16 @@
+// PASSPORT — данные документа, удостоверяющего личность (серия/номер паспорта
+// любой страны, код подразделения). СНИЛС сюда НЕ входит: он идёт в REG_NUMBER
+// вместе с ИНН физлица, ІПН и РНОКПП — это регистрационные номера в реестрах, а
+// не документы. Если понадобится развести их по разным плейсхолдерам, достаточно
+// завести отдельный тип здесь: список ниже — единственный источник правды, UI и
+// экспорт читают его.
 export type EntityType =
-  | 'PERSON' | 'COMPANY' | 'ADDRESS' | 'REG_NUMBER'
-  | 'IBAN' | 'SWIFT' | 'ACCOUNT' | 'CARD' | 'EMAIL' | 'PHONE' | 'OTHER'
+  | 'PERSON' | 'COMPANY' | 'ADDRESS' | 'REG_NUMBER' | 'PASSPORT'
+  | 'IBAN' | 'SWIFT' | 'ACCOUNT' | 'CARD' | 'EMAIL' | 'PHONE' | 'URL' | 'OTHER'
 
 export const ALL_ENTITY_TYPES: EntityType[] = [
-  'PERSON', 'COMPANY', 'ADDRESS', 'REG_NUMBER',
-  'IBAN', 'SWIFT', 'ACCOUNT', 'CARD', 'EMAIL', 'PHONE', 'OTHER',
+  'PERSON', 'COMPANY', 'ADDRESS', 'REG_NUMBER', 'PASSPORT',
+  'IBAN', 'SWIFT', 'ACCOUNT', 'CARD', 'EMAIL', 'PHONE', 'URL', 'OTHER',
 ]
 
 export interface RawMatch {

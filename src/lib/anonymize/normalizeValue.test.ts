@@ -37,4 +37,25 @@ describe('normalizeValue', () => {
     expect(normalizeValue('IBAN', 'gb82 west1234 5698765432')).toBe('GB82WEST12345698765432')
     expect(normalizeValue('ACCOUNT', '1234-5678')).toBe('12345678')
   })
+
+  // Паспорт пишут по-разному в шапке и в реквизитах одного и того же договора.
+  it('groups PASSPORT spacing variants', () => {
+    const a = normalizeValue('PASSPORT', '4506 123456')
+    expect(normalizeValue('PASSPORT', '45 06 123456')).toBe(a)
+    expect(normalizeValue('PASSPORT', '4506123456')).toBe(a)
+  })
+
+  it('uppercases a PASSPORT letter series', () => {
+    expect(normalizeValue('PASSPORT', 'ab 1234567')).toBe('AB1234567')
+  })
+
+  it('groups URL spellings of the same host', () => {
+    const a = normalizeValue('URL', 'https://Example.com/')
+    expect(normalizeValue('URL', 'www.example.com')).toBe(a)
+    expect(normalizeValue('URL', 'example.com')).toBe(a)
+  })
+
+  it('keeps distinct URL paths apart', () => {
+    expect(normalizeValue('URL', 'example.com/a')).not.toBe(normalizeValue('URL', 'example.com/b'))
+  })
 })

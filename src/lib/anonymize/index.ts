@@ -33,6 +33,21 @@ export function normalizeValue(type: EntityType, value: string): string {
   if (type === 'REG_NUMBER' || type === 'SWIFT') {
     return trimmed.replace(/[\s-]/g, '').toUpperCase()
   }
+  // Паспорт пишут и «4506 123456», и «45 06 123456», и «4506123456» — это одна
+  // и та же сущность, поэтому пробелы и дефисы снимаем. Регистр вверх ради
+  // серий с буквами (UA «АВ 123456», загранпаспорта).
+  if (type === 'PASSPORT') {
+    return trimmed.replace(/[\s-]/g, '').toUpperCase()
+  }
+  // Сайт: схема, www и хвостовой слэш — вариации записи одного адреса, а не
+  // разные сущности («https://Example.com/» ≡ «www.example.com» ≡ «example.com»).
+  if (type === 'URL') {
+    return trimmed
+      .toLowerCase()
+      .replace(/^[a-z]+:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/+$/, '')
+  }
   return trimmed
 }
 

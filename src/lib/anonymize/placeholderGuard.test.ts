@@ -5,6 +5,7 @@ import {
   escapePlaceholderLiteral,
   unescapePlaceholders,
 } from './placeholderGuard'
+import { ALL_ENTITY_TYPES } from './types'
 
 describe('findPlaceholderRanges', () => {
   it('locates a single [PERSON_1]-style literal', () => {
@@ -52,5 +53,13 @@ describe('escapePlaceholderLiteral / unescapePlaceholders round-trip', () => {
   it('leaves text without collisions unchanged by unescape', () => {
     const text = 'Nothing to see here'
     expect(unescapePlaceholders(text)).toBe(text)
+  })
+
+  // Список типов раньше дублировался строковым литералом, и новый тип молча
+  // выпадал из защиты. Теперь он берётся из ALL_ENTITY_TYPES — проверяем на всех.
+  it('covers every entity type, including newly added ones', () => {
+    for (const type of ALL_ENTITY_TYPES) {
+      expect(hasPlaceholderCollision(`текст [${type}_1] текст`)).toBe(true)
+    }
   })
 })

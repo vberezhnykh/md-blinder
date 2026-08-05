@@ -523,4 +523,153 @@ describe('detectStructural', () => {
       expect(matches.some((m) => m.type === 'REG_NUMBER' && m.value === '12345678')).toBe(false)
     })
   })
+
+  describe('snils', () => {
+    const snils = (text: string) =>
+      detectStructural(text).filter((m) => m.type === 'REG_NUMBER')
+
+    it('detects a canonical SNILS after its label', () => {
+      expect(snils('СНИЛС 123-456-789 01').map((m) => m.value)).toContain('123-456-789 01')
+    })
+
+    it('detects a run-together SNILS after its label', () => {
+      expect(snils('СНИЛС: 12345678901').map((m) => m.value)).toContain('12345678901')
+    })
+
+    it('detects the hyphenated format without a label', () => {
+      expect(snils('123-456-789 01').map((m) => m.value)).toContain('123-456-789 01')
+    })
+
+    it('does not claim a bare 11-digit number as SNILS', () => {
+      expect(snils('Инвентарный 12345678901').some((m) => m.value === '12345678901')).toBe(false)
+    })
+
+    // Без этого СНИЛС и телефон дают совпадающие спаны, и победитель зависел бы
+    // от порядка элементов в массиве, а не от правила.
+    it('is not also claimed by the phone detector', () => {
+      const matches = detectStructural('СНИЛС 123-456-789 01')
+      expect(matches.some((m) => m.type === 'PHONE')).toBe(false)
+    })
+
+    it('reports exact offsets', () => {
+      const text = 'Работник, СНИЛС 123-456-789 01, принят'
+      const m = snils(text).find((x) => x.value === '123-456-789 01')
+      expect(m).toBeDefined()
+      expect(text.slice(m!.start, m!.end)).toBe('123-456-789 01')
+    })
+  })
+
+  describe('passports', () => {
+    const passports = (text: string) =>
+      detectStructural(text).filter((m) => m.type === 'PASSPORT').map((m) => m.value)
+
+    it('detects a Russian passport written as one run', () => {
+      expect(passports('Паспорт 4506 123456')).toEqual(['4506 123456'])
+    })
+
+    it('detects a Russian passport with a split series', () => {
+      expect(passports('паспорт 45 06 123456')).toEqual(['45 06 123456'])
+    })
+
+    // Слово «номер» между группами остаётся в тексте: под плейсхолдер уходят
+    // только сами цифры, двумя отдельными спанами.
+    it('emits series and number separately when a word separates them', () => {
+      expect(passports('Паспорт серия 4506 номер 123456')).toEqual(['4506', '123456'])
+    })
+
+    it('detects an English-labelled passport with a letter series', () => {
+      expect(passports('Passport No. AB1234567')).toEqual(['AB1234567'])
+    })
+
+    it('detects a Ukrainian passport with a Cyrillic letter series', () => {
+      expect(passports('Паспорт АВ 123456')).toEqual(['АВ 123456'])
+    })
+
+    it('does not swallow the issuing date and authority', () => {
+      expect(passports('Паспорт 4506 123456, выдан 12.05.2010 ОВД Москвы')).toEqual([
+        '4506 123456',
+      ])
+    })
+
+    // «Паспорт сделки» — валютный контроль, не документ человека. Отсекается
+    // самим построением: сразу после метки идёт слово, а не цифры.
+    it('ignores a currency-control "паспорт сделки"', () => {
+      expect(passports('Паспорт сделки № 12/34567890 от 01.02.2020')).toEqual([])
+    })
+
+    it('ignores a technical passport of equipment', () => {
+      expect(passports('Технический паспорт 1234567 на оборудование')).toEqual([])
+    })
+
+    it('ignores a cadastral passport', () => {
+      expect(passports('Кадастровый паспорт 7712345678 помещения')).toEqual([])
+    })
+
+    it('ignores a label with no plausible number after it', () => {
+      expect(passports('Паспорт № 5 приложен к делу')).toEqual([])
+      expect(passports('Паспорт предъявлен при подписании')).toEqual([])
+    })
+
+    it('detects the issuing subdivision code', () => {
+      expect(passports('код подразделения 770-053')).toEqual(['770-053'])
+    })
+
+    it('reports exact offsets', () => {
+      const text = 'Стороны: Иванов И.И., паспорт 4506 123456, действует лично'
+      const m = detectStructural(text).find((x) => x.type === 'PASSPORT')
+      expect(m).toBeDefined()
+      expect(text.slice(m!.start, m!.end)).toBe('4506 123456')
+    })
+  })
+
+  describe('websites', () => {
+    const urls = (text: string) =>
+      detectStructural(text).filter((m) => m.type === 'URL').map((m) => m.value)
+
+    it('detects a full URL with a scheme', () => {
+      expect(urls('Подробности на https://example.com/terms/v2')).toEqual([
+        'https://example.com/terms/v2',
+      ])
+    })
+
+    it('detects a www-prefixed host', () => {
+      expect(urls('Сайт www.example.co.uk работает круглосуточно')).toContain('www.example.co.uk')
+    })
+
+    it('detects a labelled bare domain', () => {
+      expect(urls('Сайт: example.com')).toEqual(['example.com'])
+    })
+
+    it('detects a bare lowercase domain', () => {
+      expect(urls('Реквизиты опубликованы на acme-legal.ru')).toEqual(['acme-legal.ru'])
+    })
+
+    it('strips trailing sentence punctuation', () => {
+      expect(urls('Смотрите example.com.')).toEqual(['example.com'])
+    })
+
+    it('does not take a URL out of a markdown link target', () => {
+      expect(urls('[Сайт](https://example.com)')).toEqual(['https://example.com'])
+    })
+
+    // Регистр — единственное, что отличает голый домен от сокращения с точкой.
+    it('does not treat a capitalised abbreviation as a domain', () => {
+      expect(urls('Acme Ltd.Co подписало договор')).toEqual([])
+    })
+
+    it('does not treat a filename as a domain', () => {
+      expect(urls('См. приложение contract.doc и akt.pdf')).toEqual([])
+    })
+
+    it('does not carve a domain out of an email address', () => {
+      expect(urls('Контакт john.doe@example.com')).toEqual([])
+    })
+
+    it('reports exact offsets', () => {
+      const text = 'Оферта размещена на https://example.com/offer и действует бессрочно'
+      const m = detectStructural(text).find((x) => x.type === 'URL')
+      expect(m).toBeDefined()
+      expect(text.slice(m!.start, m!.end)).toBe('https://example.com/offer')
+    })
+  })
 })

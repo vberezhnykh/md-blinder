@@ -1,8 +1,14 @@
+import { ALL_ENTITY_TYPES } from './types'
+
 // Защита от коллизии плейсхолдеров (ТЗ этап 5, B4): если ИСХОДНЫЙ документ уже
 // содержит строки вида [PERSON_1], они неотличимы от наших плейсхолдеров в
 // экспортируемом .md и сломали бы будущую деанонимизацию. Обнаруживаем их и
 // обратимо экранируем нулевой шириной пробелом после «[».
-const TYPES = 'PERSON|COMPANY|ADDRESS|REG_NUMBER|IBAN|SWIFT|ACCOUNT|CARD|EMAIL|PHONE|OTHER'
+//
+// Список типов берём из ALL_ENTITY_TYPES, а не дублируем строкой: раньше это был
+// literal, и новый тип сущности молча выпадал из защиты — плейсхолдер нового типа
+// в исходнике не экранировался.
+const TYPES = ALL_ENTITY_TYPES.join('|')
 const ZW = '​'
 
 function placeholderRegex(): RegExp {
