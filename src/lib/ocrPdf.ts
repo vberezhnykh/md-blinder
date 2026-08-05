@@ -1,5 +1,6 @@
 import { createWorker } from 'tesseract.js'
 import { loadPdf } from './pdf'
+import { OCR_LANGS } from './ocrLangs'
 import { stripRepeatedLinesAndPageNumbers } from './pdfStructure'
 
 export interface OcrProgress {
@@ -10,8 +11,9 @@ export interface OcrProgress {
 
 // Scanned PDFs have no text layer, so render each requested page to a canvas
 // via pdf.js and OCR it with Tesseract.js (which runs its own WASM Web
-// Worker). The eng language model is fetched from CDN on first run and
-// cached by Tesseract.js; the page image itself never leaves the browser.
+// Worker). The language models (see OCR_LANGS) are fetched from CDN on first
+// run — ~13 МБ на все три, host уже разрешён в CSP (netlify.toml) — and cached
+// by Tesseract.js; the page image itself never leaves the browser.
 //
 // pageNumbers is a set of 1-based page numbers to OCR (not necessarily the
 // whole document — see pdfToMarkdown.ts, which may OCR only a subset of
@@ -27,7 +29,7 @@ export async function ocrPdfToMarkdown(
   const total = sortedPageNumbers.length
   let currentPage = 0
 
-  const worker = await createWorker('eng', 1, {
+  const worker = await createWorker([...OCR_LANGS], 1, {
     logger: (m: { status: string; progress: number }) => {
       onProgress?.({
         page: currentPage,
