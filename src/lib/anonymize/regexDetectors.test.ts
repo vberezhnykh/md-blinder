@@ -524,6 +524,102 @@ describe('detectStructural', () => {
     })
   })
 
+  describe('russian and ukrainian address labels', () => {
+    const addresses = (text: string) =>
+      detectStructural(text).filter((m) => m.type === 'ADDRESS').map((m) => m.value)
+
+    it('detects a value after a bare "Адрес:" label', () => {
+      expect(addresses('Адрес: г. Москва, ул. Тверская, д. 1, кв. 5')).toEqual([
+        'г. Москва, ул. Тверская, д. 1, кв. 5',
+      ])
+    })
+
+    it('detects qualified noun labels', () => {
+      expect(addresses('Юридический адрес: 125009, г. Москва, ул. Тверская, д. 1')).toEqual([
+        '125009, г. Москва, ул. Тверская, д. 1',
+      ])
+      expect(addresses('Фактический адрес: 125009, г. Москва, ул. Тверская, д. 1')).toEqual([
+        '125009, г. Москва, ул. Тверская, д. 1',
+      ])
+      expect(addresses('Адрес регистрации: г. Казань, ул. Баумана, д. 7')).toEqual([
+        'г. Казань, ул. Баумана, д. 7',
+      ])
+    })
+
+    // Фразовая метка — единственная, где двоеточие необязательно: после «по
+    // адресу» всегда идёт адрес, в договорах двоеточия там обычно нет.
+    it('detects a phrase label with and without a colon', () => {
+      expect(addresses('Зарегистрирован по адресу: г. Москва, ул. Тверская, д. 1')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+      expect(addresses('проживающий по адресу г. Москва, ул. Тверская, д. 1')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+    })
+
+    it('detects Ukrainian labels', () => {
+      expect(addresses('Юридична адреса: м. Київ, вул. Хрещатик, буд. 1')).toEqual([
+        'м. Київ, вул. Хрещатик, буд. 1',
+      ])
+      expect(addresses('зареєстрований за адресою м. Київ, вул. Хрещатик, буд. 1')).toEqual([
+        'м. Київ, вул. Хрещатик, буд. 1',
+      ])
+    })
+
+    it('detects "место нахождения" and "местонахождение"', () => {
+      expect(addresses('Место нахождения: г. Москва, ул. Тверская, д. 1')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+    })
+
+    it('trims the value at the next requisites field', () => {
+      expect(addresses('Адрес: г. Москва, ул. Тверская, д. 1, ИНН 7712345678')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+      expect(addresses('Адрес: г. Москва, ул. Тверская, д. 1, тел. +7 495 1234567')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+      expect(addresses('Адрес: г. Москва, ул. Тверская, д. 1, в лице директора')).toEqual([
+        'г. Москва, ул. Тверская, д. 1',
+      ])
+    })
+
+    // Та же защита, что у английской ветки: без двоеточия именная метка в прозе
+    // не должна превращать половину предложения в адрес.
+    it('ignores a noun label used in prose without a colon', () => {
+      expect(addresses('Юридический адрес Стороны определяется приложением № 1 к договору')).toEqual([])
+    })
+
+    it('does not treat an electronic address label as a postal one', () => {
+      expect(addresses('Электронный адрес: ivanov@acme.ru')).toEqual([])
+      expect(addresses('Адрес электронной почты: ivanov@acme.ru')).toEqual([])
+    })
+
+    // Идентификатор часто вводится словом «код», и без этого обрезка не
+    // срабатывала: адрес проглатывал номер вместе с его типом, потому что
+    // ADDRESS перебивает REG_NUMBER в resolveOverlaps.
+    it('trims before an identifier introduced by "код за"', () => {
+      const text = 'Юридична адреса: м. Київ, вул. Хрещатик, буд. 1, код за ЄДРПОУ 12345678'
+      expect(addresses(text)).toEqual(['м. Київ, вул. Хрещатик, буд. 1'])
+      expect(
+        detectStructural(text).some((m) => m.type === 'REG_NUMBER' && m.value === '12345678'),
+      ).toBe(true)
+    })
+
+    it('drops a trailing requisites separator from the value', () => {
+      expect(addresses('Адрес: г. Казань, ул. Баумана, д. 7, кв. 12,\nСНИЛС 123-456-789 01')).toEqual([
+        'г. Казань, ул. Баумана, д. 7, кв. 12',
+      ])
+    })
+
+    it('reports exact offsets', () => {
+      const text = 'Сторона, зарегистрирован по адресу: г. Москва, ул. Тверская, д. 1\n'
+      const m = detectStructural(text).find((x) => x.type === 'ADDRESS')
+      expect(m).toBeDefined()
+      expect(text.slice(m!.start, m!.end)).toBe('г. Москва, ул. Тверская, д. 1')
+    })
+  })
+
   describe('snils', () => {
     const snils = (text: string) =>
       detectStructural(text).filter((m) => m.type === 'REG_NUMBER')

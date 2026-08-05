@@ -226,30 +226,34 @@ function detectAccount(text: string): RawMatch[] {
   return matches
 }
 
-// Адрес по метке: значение после "business address:" / "registered office address:" /
-// "Address:" и т.п. Двоеточие ОБЯЗАТЕЛЬНО — это отсекает прозу вида "registered office
-// address of the other Party". Значение берём до конца строки, затем обрезаем по
-// ключевому слову следующего поля. GLiNER не тегирует адреса, начинающиеся со страны
-// (Georgia, ... / Hungary, ...) — этот детектор ловит их детерминированно. Структурные
-// матчи перебивают NER в resolveOverlaps, поэтому регексовый адрес поглощает NER-фрагменты.
-function detectAddress(text: string): RawMatch[] {
-  const matches: RawMatch[] = []
-  const labelRe =
-    /\b(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+|registered\s+)?address\s*:/gi
-  // Ключевые слова следующего поля в той же строке — по ним обрезаем хвост значения.
-  const fieldRe =
-    /,\s*(?:company\s+(?:registration|reg)\b|registration\s+(?:no|number)\b|reg\.?\s*(?:no|number)\b|CRN\b|VAT\b|represented\s+by\b|acting\b|director\b|tel\b|phone\b|fax\b|e-?mail\b|hereinafter\b)/i
-  // Помеченное контактное поле (Phone #:, Tel:, Fax:, Email:) обрезаем даже БЕЗ
-  // запятой перед ним: Stage 9 может склеить адрес и контакты в один абзац
-  // ("... Example City Phone #: <номер>"), и без этой обрезки адрес проглатывал
-  // бы телефон (структурный ADDRESS перебивает структурный PHONE).
-  const contactFieldRe = /\s(?:telephone|tel|phone|fax|e-?mail|mobile|cell)\b[\s.]*[:#]/i
+interface AddressLabelSpec {
+  // Метка адреса; обязателен флаг g. Значением считается всё, что идёт следом.
+  labelRe: RegExp
+  // Не-адресная метка, опознаваемая по тексту ПЕРЕД совпадением («email address:»).
+  skipBefore?: RegExp
+  // Повторная метка в начале значения («Address: Address: …»).
+  doubleLabelRe: RegExp
+  // Ключевое слово следующего поля после запятой — по нему обрезаем хвост.
+  fieldRe: RegExp
+  // Помеченное контактное поле, обрезается и без запятой перед ним.
+  contactFieldRe: RegExp
+}
 
+// Граница ячейки таблицы: docx-таблицы склеивают ряд в одну «строку» через
+// <br> и |, поэтому без этой обрезки адрес проглатывал бы весь ряд (телефон,
+// компанию, подпись-подчёркивания) — структурный ADDRESS перебивает PHONE и
+// др. в resolveOverlaps. Обрезаем по первому <br> / | / ряду подчёркиваний.
+const ADDRESS_CELL_BOUNDARY_RE = /<br\s*\/?>|\||(?:\\?_){3,}/i
+
+// Общий разбор «метка → значение до конца строки → обрезка по следующему полю».
+// Вынесен из detectAddress, чтобы английская и русско-украинская метки делили
+// одну логику: расходятся они только словарями, а правила обрезки и проверки
+// правдоподобия у них одни и те же.
+function collectLabelledAddresses(text: string, spec: AddressLabelSpec): RawMatch[] {
+  const matches: RawMatch[] = []
   let m: RegExpExecArray | null
-  while ((m = labelRe.exec(text))) {
-    // Не-адресные метки: "email address:", "e-mail address:", "IP address:", "web address:".
-    const before = text.slice(Math.max(0, m.index - 8), m.index)
-    if (/(?:e-?mail|ip|web|url)\s$/i.test(before)) continue
+  while ((m = spec.labelRe.exec(text))) {
+    if (spec.skipBefore?.test(text.slice(Math.max(0, m.index - 14), m.index))) continue
 
     const valueStart = m.index + m[0].length
     let lineEnd = text.indexOf('\n', valueStart)
@@ -261,22 +265,20 @@ function detectAddress(text: string): RawMatch[] {
     // значение, начинающееся с самого адреса (а не со слова "Address"). Без
     // этого фрагмент "Address: 11 …" стартует раньше многострочного адреса и
     // блокирует его в resolveOverlaps.
-    if (/^\s*(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+)?address\s*:/i.test(raw)) continue
+    if (spec.doubleLabelRe.test(raw)) continue
 
     const cuts: number[] = []
-    const fm = fieldRe.exec(raw)
+    const fm = spec.fieldRe.exec(raw)
     if (fm) cuts.push(fm.index)
-    const cm = contactFieldRe.exec(raw)
+    const cm = spec.contactFieldRe.exec(raw)
     if (cm) cuts.push(cm.index)
-    // Граница ячейки таблицы: docx-таблицы склеивают ряд в одну «строку» через
-    // <br> и |, поэтому без этой обрезки адрес проглатывал бы весь ряд (телефон,
-    // компанию, подпись-подчёркивания) — структурный ADDRESS перебивает PHONE и
-    // др. в resolveOverlaps. Обрезаем по первому <br> / | / ряду подчёркиваний.
-    const bm = /<br\s*\/?>|\||(?:\\?_){3,}/i.exec(raw)
+    const bm = ADDRESS_CELL_BOUNDARY_RE.exec(raw)
     if (bm) cuts.push(bm.index)
     if (cuts.length) raw = raw.slice(0, Math.min(...cuts))
 
-    const value = raw.trim()
+    // Хвостовая запятая/точка с запятой — разделитель реквизитов, а не часть
+    // адреса: без обрезки она уезжает под плейсхолдер вместе со значением.
+    const value = raw.trim().replace(/[,;]+$/, '')
     const leadWs = raw.length - raw.trimStart().length
     // Похоже на адрес: минимальная длина, есть цифра или запятая, не e-mail.
     if (value.length < 5) continue
@@ -287,6 +289,78 @@ function detectAddress(text: string): RawMatch[] {
     matches.push({ type: 'ADDRESS', value, start, end: start + value.length })
   }
   return matches
+}
+
+// Адрес по метке: значение после "business address:" / "registered office address:" /
+// "Address:" и т.п. Двоеточие ОБЯЗАТЕЛЬНО — это отсекает прозу вида "registered office
+// address of the other Party". Значение берём до конца строки, затем обрезаем по
+// ключевому слову следующего поля. GLiNER не тегирует адреса, начинающиеся со страны
+// (Georgia, ... / Hungary, ...) — этот детектор ловит их детерминированно. Структурные
+// матчи перебивают NER в resolveOverlaps, поэтому регексовый адрес поглощает NER-фрагменты.
+function detectAddress(text: string): RawMatch[] {
+  return collectLabelledAddresses(text, {
+    labelRe:
+      /\b(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+|registered\s+)?address\s*:/gi,
+    // Не-адресные метки: "email address:", "IP address:", "web address:".
+    skipBefore: /(?:e-?mail|ip|web|url)\s$/i,
+    doubleLabelRe:
+      /^\s*(?:registered\s+office\s+|business\s+|legal\s+|postal\s+|residential\s+|correspondence\s+)?address\s*:/i,
+    fieldRe:
+      /,\s*(?:company\s+(?:registration|reg)\b|registration\s+(?:no|number)\b|reg\.?\s*(?:no|number)\b|CRN\b|VAT\b|represented\s+by\b|acting\b|director\b|tel\b|phone\b|fax\b|e-?mail\b|hereinafter\b)/i,
+    // Помеченное контактное поле (Phone #:, Tel:, Fax:, Email:) обрезаем даже БЕЗ
+    // запятой перед ним: Stage 9 может склеить адрес и контакты в один абзац
+    // ("... Example City Phone #: <номер>"), и без этой обрезки адрес проглатывал
+    // бы телефон (структурный ADDRESS перебивает структурный PHONE).
+    contactFieldRe: /\s(?:telephone|tel|phone|fax|e-?mail|mobile|cell)\b[\s.]*[:#]/i,
+  })
+}
+
+// Русские и украинские метки адреса. Раньше их не было вовсе: detectAddress
+// требует слова "address", поэтому «зарегистрирован по адресу: г. Москва, …» не
+// ловился структурно и оставался на NER — а GLiNER на кириллических адресах
+// разбирает их на куски (город отдельно, улица отдельно) либо пропускает.
+//
+// Двоеточие обязательно у ИМЕННЫХ меток, ровно по той же причине, что и в
+// английской ветке: «юридический адрес Стороны определяется приложением» не
+// должен становиться адресом. Исключение — фразовые метки «по адресу» / «за
+// адресою»: сама фраза уже достаточный якорь, после неё всегда идёт адрес,
+// и двоеточия там обычно нет.
+//
+// Кириллические метки нельзя ограничивать \b — в JS он определяется только по
+// ASCII (та же оговорка, что в detectRussianIds), поэтому границы задаём через
+// lookaround по \p{L} с флагом u.
+const RU_ADDRESS_NOUN_SRC =
+  '(?:(?:юридическ|фактическ|почтов|домашн|юридичн|фактичн|поштов)\\p{L}*\\s+)?' +
+  'адрес(?:а|у)?(?:\\s+(?:регистрации|реєстрації|проживания|проживання|' +
+  'места\\s+жительства|місця\\s+проживання|доставки|для\\s+корреспонденции))?\\s*:'
+
+const RU_ADDRESS_LABEL_SRC =
+  '(?:' +
+  '(?:по\\s+адресу|за\\s+адресою)\\s*:?' +
+  `|${RU_ADDRESS_NOUN_SRC}` +
+  '|(?:мест[оа]\\s+(?:нахождения|жительства)|местонахождение|місцезнаходження)\\s*:' +
+  ')'
+
+function detectRussianAddress(text: string): RawMatch[] {
+  return collectLabelledAddresses(text, {
+    labelRe: new RegExp(`(?<!\\p{L})${RU_ADDRESS_LABEL_SRC}`, 'giu'),
+    // «электронный адрес:», «эл. адрес:», «интернет-адрес:» — не почтовый адрес.
+    // «адрес электронной почты:» отсекается самой меткой: между «адрес» и
+    // двоеточием стоят слова, которых нет в списке уточнений.
+    skipBefore: /(?:электронн|эл\.?|интернет-?|сетев|поштов[а-яіїєґ]*\s+скринь)\p{L}*\s*$/iu,
+    doubleLabelRe: new RegExp(`^\\s*${RU_ADDRESS_LABEL_SRC}`, 'iu'),
+    // Идентификаторы часто вводятся словом «код» («, код за ЄДРПОУ 12345678») —
+    // без этого префикса обрезка не срабатывала и адрес проглатывал номер
+    // целиком, а вместе с ним и его тип: ADDRESS перебивает REG_NUMBER.
+    fieldRe: new RegExp(
+      ',\\s*(?:код\\s+(?:за\\s+)?)?' +
+        '(?:тел(?:ефон)?|факс|e-?mail|эл\\.?\\s*почт\\p{L}*|ИНН|КПП|ОГРНИП|ОГРН|БИК|СНИЛС|' +
+        'ЄДРПОУ|ІПН|РНОКПП|р\\/с|к\\/с|паспорт|именуем\\p{L}*|іменован\\p{L}*|в\\s+лице|' +
+        'в\\s+особі|действующ\\p{L}*|діюч\\p{L}*)(?!\\p{L})',
+      'iu',
+    ),
+    contactFieldRe: /\s(?:тел(?:ефон)?|факс|e-?mail|эл\.?\s*почт\p{L}*)\s*[.:#]/iu,
+  })
 }
 
 // C2: US notice-block addresses that carry NO "Address:" label (SEC "If to:" /
@@ -811,6 +885,7 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectAccount(text),
     ...detectRegNumber(text),
     ...detectAddress(text),
+    ...detectRussianAddress(text),
     ...detectUsAddress(text),
   ]
 }
