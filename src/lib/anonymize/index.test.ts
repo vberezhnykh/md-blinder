@@ -186,16 +186,16 @@ describe('anonymizeMarkdown', () => {
   // исход решает правило «при равном start побеждает длинный спан» в
   // resolveOverlaps — телефон захватывает на цифру меньше. Тест сторожит именно
   // это, а не сам факт детекции паспорта.
-  it('resolves a Russian passport against the phone detector in favour of PASSPORT', async () => {
+  it('resolves a Russian passport against the phone detector in favour of ID_DOC', async () => {
     const markdown = 'Иванов И.И., паспорт 4506 123456, проживает в Москве'
     mockedDetectEntitiesNer.mockResolvedValueOnce([])
 
     const { result } = await anonymizeMarkdown(markdown)
 
-    const passport = result.entities.find((e) => e.type === 'PASSPORT')
+    const passport = result.entities.find((e) => e.type === 'ID_DOC')
     expect(passport?.value).toBe('4506 123456')
     expect(result.entities.some((e) => e.type === 'PHONE')).toBe(false)
-    expect(result.markdown).toContain('[PASSPORT_1]')
+    expect(result.markdown).toContain('[ID_DOC_1]')
     expect(result.markdown).not.toContain('4506 123456')
   })
 
@@ -211,7 +211,7 @@ describe('anonymizeMarkdown', () => {
 
     expect(result.entities.find((e) => e.type === 'URL')?.placeholder).toBe('[URL_1]')
     expect(result.markdown).toBe(
-      'СНИЛС [REG_NUMBER_1], паспорт [PASSPORT_1], сайт [URL_1]',
+      'СНИЛС [REG_NUMBER_1], паспорт [ID_DOC_1], сайт [URL_1]',
     )
   })
 

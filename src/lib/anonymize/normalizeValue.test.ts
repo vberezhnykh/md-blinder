@@ -39,14 +39,14 @@ describe('normalizeValue', () => {
   })
 
   // Паспорт пишут по-разному в шапке и в реквизитах одного и того же договора.
-  it('groups PASSPORT spacing variants', () => {
-    const a = normalizeValue('PASSPORT', '4506 123456')
-    expect(normalizeValue('PASSPORT', '45 06 123456')).toBe(a)
-    expect(normalizeValue('PASSPORT', '4506123456')).toBe(a)
+  it('groups ID_DOC spacing variants', () => {
+    const a = normalizeValue('ID_DOC', '4506 123456')
+    expect(normalizeValue('ID_DOC', '45 06 123456')).toBe(a)
+    expect(normalizeValue('ID_DOC', '4506123456')).toBe(a)
   })
 
-  it('uppercases a PASSPORT letter series', () => {
-    expect(normalizeValue('PASSPORT', 'ab 1234567')).toBe('AB1234567')
+  it('uppercases an ID_DOC letter series', () => {
+    expect(normalizeValue('ID_DOC', 'ab 1234567')).toBe('AB1234567')
   })
 
   it('groups URL spellings of the same host', () => {

@@ -559,64 +559,116 @@ describe('detectStructural', () => {
     })
   })
 
-  describe('passports', () => {
-    const passports = (text: string) =>
-      detectStructural(text).filter((m) => m.type === 'PASSPORT').map((m) => m.value)
+  describe('identity documents', () => {
+    const ids = (text: string) =>
+      detectStructural(text).filter((m) => m.type === 'ID_DOC').map((m) => m.value)
 
     it('detects a Russian passport written as one run', () => {
-      expect(passports('Паспорт 4506 123456')).toEqual(['4506 123456'])
+      expect(ids('Паспорт 4506 123456')).toEqual(['4506 123456'])
     })
 
     it('detects a Russian passport with a split series', () => {
-      expect(passports('паспорт 45 06 123456')).toEqual(['45 06 123456'])
+      expect(ids('паспорт 45 06 123456')).toEqual(['45 06 123456'])
     })
 
     // Слово «номер» между группами остаётся в тексте: под плейсхолдер уходят
     // только сами цифры, двумя отдельными спанами.
     it('emits series and number separately when a word separates them', () => {
-      expect(passports('Паспорт серия 4506 номер 123456')).toEqual(['4506', '123456'])
+      expect(ids('Паспорт серия 4506 номер 123456')).toEqual(['4506', '123456'])
     })
 
     it('detects an English-labelled passport with a letter series', () => {
-      expect(passports('Passport No. AB1234567')).toEqual(['AB1234567'])
+      expect(ids('Passport No. AB1234567')).toEqual(['AB1234567'])
     })
 
     it('detects a Ukrainian passport with a Cyrillic letter series', () => {
-      expect(passports('Паспорт АВ 123456')).toEqual(['АВ 123456'])
+      expect(ids('Паспорт АВ 123456')).toEqual(['АВ 123456'])
+    })
+
+    it('detects a hyphenated number as a single span', () => {
+      expect(ids('Паспорт 4506-123456')).toEqual(['4506-123456'])
     })
 
     it('does not swallow the issuing date and authority', () => {
-      expect(passports('Паспорт 4506 123456, выдан 12.05.2010 ОВД Москвы')).toEqual([
-        '4506 123456',
-      ])
+      expect(ids('Паспорт 4506 123456, выдан 12.05.2010 ОВД Москвы')).toEqual(['4506 123456'])
+    })
+
+    // Документ, удостоверяющий личность, — не только паспорт: набор зависит от
+    // гражданства и статуса стороны.
+    it('detects a Russian driving licence', () => {
+      expect(ids('Водительское удостоверение 77 12 345678')).toEqual(['77 12 345678'])
+      expect(ids('водительские права 7712345678')).toEqual(['7712345678'])
+    })
+
+    it('detects an English driving licence with an alphanumeric number', () => {
+      expect(ids("Driver's licence SMITH751125AB9CD")).toEqual(['SMITH751125AB9CD'])
+    })
+
+    it('detects a residence permit', () => {
+      expect(ids('ВНЖ 82 1234567')).toEqual(['82 1234567'])
+      expect(ids('вид на жительство № 1234567')).toEqual(['1234567'])
+      expect(ids('Residence permit AB1234567')).toEqual(['AB1234567'])
+    })
+
+    it('detects a temporary residence permit and an ID card', () => {
+      expect(ids('РВП 1234567')).toEqual(['1234567'])
+      expect(ids('ID-картка 123456789')).toEqual(['123456789'])
+    })
+
+    it('detects a Russian military ID', () => {
+      expect(ids('Военный билет АА 1234567')).toEqual(['АА 1234567'])
+    })
+
+    // «Права» и «удостоверение» сами по себе стоят в каждом договоре — метка
+    // засчитывается только с определением.
+    it('does not fire on the bare words "права" or "удостоверение"', () => {
+      expect(ids('Права и обязанности сторон 1234567 определены разделом 5')).toEqual([])
+      expect(ids('Удостоверение 1234567 приложено')).toEqual([])
     })
 
     // «Паспорт сделки» — валютный контроль, не документ человека. Отсекается
     // самим построением: сразу после метки идёт слово, а не цифры.
     it('ignores a currency-control "паспорт сделки"', () => {
-      expect(passports('Паспорт сделки № 12/34567890 от 01.02.2020')).toEqual([])
+      expect(ids('Паспорт сделки № 12/34567890 от 01.02.2020')).toEqual([])
     })
 
     it('ignores a technical passport of equipment', () => {
-      expect(passports('Технический паспорт 1234567 на оборудование')).toEqual([])
+      expect(ids('Технический паспорт 1234567 на оборудование')).toEqual([])
     })
 
     it('ignores a cadastral passport', () => {
-      expect(passports('Кадастровый паспорт 7712345678 помещения')).toEqual([])
+      expect(ids('Кадастровый паспорт 7712345678 помещения')).toEqual([])
     })
 
     it('ignores a label with no plausible number after it', () => {
-      expect(passports('Паспорт № 5 приложен к делу')).toEqual([])
-      expect(passports('Паспорт предъявлен при подписании')).toEqual([])
+      expect(ids('Паспорт № 5 приложен к делу')).toEqual([])
+      expect(ids('Паспорт предъявлен при подписании')).toEqual([])
     })
 
     it('detects the issuing subdivision code', () => {
-      expect(passports('код подразделения 770-053')).toEqual(['770-053'])
+      expect(ids('код подразделения 770-053')).toEqual(['770-053'])
+    })
+
+    // Метка соседнего поля коротка и заглавна, то есть неотличима от буквенной
+    // серии: «…, ІПН 123456789012» разбиралось как второй номер того же
+    // документа с серией «ІПН».
+    it('stops at the label of the next requisites field', () => {
+      expect(ids('Паспорт АВ 123456, ІПН 123456789012')).toEqual(['АВ 123456'])
+      expect(ids('ВНЖ 82 1234567, РВП 1234567')).toEqual(['82 1234567', '1234567'])
+    })
+
+    it('does not read a following field label as a series when the number is missing', () => {
+      expect(ids('Паспорт предъявлен, ИНН 771234567890')).toEqual([])
+    })
+
+    it('leaves the neighbouring identifier to its own detector', () => {
+      const matches = detectStructural('Паспорт АВ 123456, ІПН 123456789012')
+      expect(matches.some((m) => m.type === 'REG_NUMBER' && m.value === '123456789012')).toBe(true)
     })
 
     it('reports exact offsets', () => {
       const text = 'Стороны: Иванов И.И., паспорт 4506 123456, действует лично'
-      const m = detectStructural(text).find((x) => x.type === 'PASSPORT')
+      const m = detectStructural(text).find((x) => x.type === 'ID_DOC')
       expect(m).toBeDefined()
       expect(text.slice(m!.start, m!.end)).toBe('4506 123456')
     })

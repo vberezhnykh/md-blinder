@@ -579,99 +579,141 @@ function detectSnils(text: string): RawMatch[] {
   return matches
 }
 
-// Слова, которые допустимо встретить между меткой «паспорт» и самим номером.
-// Всё, чего здесь нет, обрывает разбор — так «паспорт сделки», «паспорт
-// объекта», «паспорт качества» не превращаются в персональные данные.
-const PASSPORT_FILLER_WORDS = new Set([
+// Метки документов, удостоверяющих личность. Паспорт — лишь самый частый из
+// них: у сторон договора встречаются водительские права, вид на жительство,
+// РВП, ID-карта, военный билет, и все они дают один тип ID_DOC.
+//
+// Многословные метки требуют определения и не сводятся к одному слову — это
+// намеренно. «права» само по себе стоит в каждом договоре («права и обязанности
+// сторон»), «удостоверение» и «свидетельство» почти так же неспецифичны, поэтому
+// они ловятся только в составе «водительские права», «удостоверение личности».
+const ID_DOC_LABEL_SRC =
+  '(?:' +
+  '(?:закордонн\\p{L}*\\s+|заграничн\\p{L}*\\s+|загран)?паспорт\\p{L}*' +
+  '|passport' +
+  '|водительск\\p{L}*\\s+(?:удостоверени\\p{L}*|прав\\p{L}*)' +
+  '|посв[іи]дченн\\p{L}*\\s+вод[іи]я' +
+  '|driv(?:er[\'’]?s?|ing)\\s+(?:licen[cs]e|permit)' +
+  '|вид\\p{L}*\\s+на\\s+жительство' +
+  '|ВНЖ|РВП' +
+  '|посв[іи]дк\\p{L}*\\s+на\\s+(?:пост[іи]йне\\s+|тимчасове\\s+)?проживання' +
+  '|residence\\s+(?:permit|card)' +
+  '|удостоверени\\p{L}*\\s+личности' +
+  '|посв[іи]дченн\\p{L}*\\s+особи' +
+  '|ID[\\s-]?(?:card|картк\\p{L}*|карт\\p{L}*)' +
+  '|identity\\s+card' +
+  '|военн\\p{L}*\\s+билет\\p{L}*' +
+  ')'
+
+// Слова, которые допустимо встретить между меткой и самим номером. Всё, чего
+// здесь нет, обрывает разбор — так «паспорт сделки», «паспорт объекта»,
+// «паспорт качества» не превращаются в персональные данные.
+const ID_DOC_FILLER_WORDS = new Set([
   'серия', 'серии', 'серию', 'сер', 'серія', 'серії', 'номер', 'номера', 'нр',
-  'no', 'nr', 'number', 'series', 'id', 'док', 'документ',
+  'no', 'nr', 'number', 'series', 'id', 'док', 'документ', 'бланк', 'бланка',
   'гражданина', 'гражданки', 'громадянина', 'громадянки',
   'рф', 'рб', 'россии', 'российской', 'федерации', 'украины', 'україни',
   'казахстана', 'республики', 'беларусь', 'узбекистана', 'таджикистана',
 ])
 
+// Метки СОСЕДНИХ полей в блоке реквизитов. Встретив такую, скан обязан
+// остановиться: дальше идёт уже другой идентификатор. Обычное слово и так
+// обрывает разбор, но эти — короткие и заглавные, то есть неотличимы от
+// буквенной серии («…, ІПН 123456789012» разбиралось как серия «ІПН» + номер).
+const ID_DOC_STOP_LABELS = new Set([
+  'инн', 'кпп', 'огрн', 'огрнип', 'снилс', 'бик', 'ипн', 'іпн', 'єдрпоу',
+  'едрпоу', 'рнокпп', 'iban', 'swift', 'bic', 'vat', 'ein', 'cnpj', 'crn',
+  'внж', 'рвп', 'тел', 'тел.', 'tel', 'fax', 'email',
+])
+
 // Определения, после которых «паспорт» означает документ на вещь, а не на
 // человека. Метка ловится вместе с ними (они стоят ПЕРЕД словом, поэтому
 // разбором «что идёт после метки» не отсекаются).
-const PASSPORT_NOT_ID_BEFORE =
+const ID_DOC_NOT_PERSONAL_BEFORE =
   /(?:техническ|кадастров|санитарн|ветеринарн|энергетическ|качеств|безопасност|заводск|электронн)\p{L}*\s+$/iu
 
-// Паспорта. Единственный надёжный якорь — метка: номер паспорта почти в любой
-// стране это просто буквенно-цифровая строка, и детектор «по форме» собрал бы
-// половину документа. Поэтому разбор всегда начинается со слова
-// «паспорт»/«passport», а значение берётся из того, что идёт следом.
+// Документ, удостоверяющий личность. Единственный надёжный якорь — метка: номер
+// такого документа почти в любой стране это просто буквенно-цифровая строка, и
+// детектор «по форме» собрал бы половину документа. Поэтому разбор всегда
+// начинается с метки, а значение берётся из того, что идёт следом.
 //
 // Разбираем не одним мега-регексом, а сканом токенов после метки: это даёт
-// поддержку любой страны без перечисления форматов и, главное, корректно ведёт
-// себя с разорванной записью. «паспорт 4506 123456» — один спан на обе группы;
-// «паспорт серия 4506 номер 123456» — два отдельных спана, слово «номер» между
-// ними остаётся в тексте, а не уезжает под плейсхолдер.
+// поддержку любой страны и любого вида документа без перечисления форматов и,
+// главное, корректно ведёт себя с разорванной записью. «паспорт 4506 123456» —
+// один спан на обе группы; «паспорт серия 4506 номер 123456» — два отдельных
+// спана, слово «номер» между ними остаётся в тексте, а не уезжает под
+// плейсхолдер.
 //
 // Дата и орган выдачи («выдан 12.05.2010 ОВД…») в спан не попадают: «выдан» не
 // служебное слово, скан на нём останавливается.
-function detectPassport(text: string): RawMatch[] {
+function detectIdDocument(text: string): RawMatch[] {
   const matches: RawMatch[] = []
 
-  const labelRe =
-    /(?<!\p{L})(?:закордонн\p{L}*\s+|заграничн\p{L}*\s+|загран)?(?:паспорт\p{L}*|passport)(?!\p{L})/giu
+  const labelRe = new RegExp(`(?<!\\p{L})${ID_DOC_LABEL_SRC}(?!\\p{L})`, 'giu')
   let lm: RegExpExecArray | null
   while ((lm = labelRe.exec(text))) {
-    if (PASSPORT_NOT_ID_BEFORE.test(text.slice(Math.max(0, lm.index - 24), lm.index))) continue
+    if (ID_DOC_NOT_PERSONAL_BEFORE.test(text.slice(Math.max(0, lm.index - 24), lm.index))) continue
 
     const windowStart = lm.index + lm[0].length
     const window = text.slice(windowStart, windowStart + 70)
 
-    // Токены: число (возможно с внутренними пробелами), слово, разделитель.
-    const tokenRe = /(\d[\d\s]*\d|\d)|(\p{L}+)|([:№#.,/\\-]+)|(\S)/gu
+    // Токены: буквенно-цифровой прогон, разделитель, всё остальное.
+    const tokenRe = /([\p{L}\d]+)|([:№#.,/\\-]+)|(\S)/gu
     const runs: { start: number; end: number }[] = []
     let digitCount = 0
     let pendingPrefix: { start: number; end: number } | null = null
     let t: RegExpExecArray | null
     while ((t = tokenRe.exec(window))) {
-      const [raw, digits, word, sep] = t
-      if (sep) {
-        pendingPrefix = null
-        continue
-      }
-      if (word) {
-        // Короткая ЗАГЛАВНАЯ группа букв перед цифрами — буквенная серия
-        // (украинский «АВ 123456», загранпаспорта). Держим её до следующего
-        // токена: если дальше цифры, она войдёт в спан, иначе разбор оборвётся.
-        if (/^[A-ZА-ЯЁІЇЄҐ]{1,3}$/u.test(raw)) {
+      const [raw, alnum, sep] = t
+      if (sep) continue
+      if (!alnum) break
+
+      const hasDigit = /\d/.test(raw)
+      const hasLetter = /\p{L}/u.test(raw)
+
+      // Чистые буквы: либо короткая ЗАГЛАВНАЯ серия перед цифрами («АВ 123456»),
+      // либо служебное слово, либо конец разбора.
+      if (!hasDigit) {
+        if (ID_DOC_STOP_LABELS.has(raw.toLowerCase())) break
+        // Серия бывает только ДО номера. Без этого условия метка следующего
+        // поля («…123456, ІПН 1234…») подхватывалась бы как серия второго
+        // номера того же документа.
+        if (runs.length === 0 && /^[A-ZА-ЯЁІЇЄҐ]{1,3}$/u.test(raw)) {
           pendingPrefix = { start: t.index, end: t.index + raw.length }
           continue
         }
-        if (PASSPORT_FILLER_WORDS.has(raw.toLowerCase())) {
+        if (ID_DOC_FILLER_WORDS.has(raw.toLowerCase())) {
           pendingPrefix = null
           continue
         }
         break
       }
-      if (digits) {
-        const trimmed = raw.trimEnd()
-        const start = pendingPrefix ? pendingPrefix.start : t.index
-        const end = t.index + trimmed.length
-        digitCount += trimmed.replace(/\D/g, '').length
-        // Смежные группы («4506 123456») склеиваем в один спан: между ними
-        // только пробел, значит это одна запись номера.
-        const last = runs[runs.length - 1]
-        if (last && !pendingPrefix && window.slice(last.end, t.index).trim() === '') {
-          last.end = end
-        } else {
-          runs.push({ start, end })
-        }
-        pendingPrefix = null
-        if (runs.length >= 3) break
-        continue
+
+      // Смешанный прогон букв и цифр — это сам номер (британские права
+      // «SMITH751125AB9CD», загранпаспорта «AB1234567»). Требуем верхний
+      // регистр: обычные слова с цифрами («приложение1») так не пишут.
+      if (hasLetter && !/^[A-Z0-9А-ЯЁІЇЄҐ]{5,20}$/u.test(raw)) break
+
+      const start = pendingPrefix ? pendingPrefix.start : t.index
+      const end = t.index + raw.length
+      digitCount += raw.replace(/\D/g, '').length
+      // Соседние группы («4506 123456», «4506-123456») склеиваем в один спан:
+      // между ними только пробел или дефис, значит это одна запись номера.
+      const last = runs[runs.length - 1]
+      if (last && !pendingPrefix && /^[\s-]*$/.test(window.slice(last.end, t.index))) {
+        last.end = end
+      } else {
+        runs.push({ start, end })
       }
-      break
+      pendingPrefix = null
+      if (runs.length >= 3) break
     }
 
-    // Слишком короткое число после метки («паспорт № 5») — это не номер паспорта.
+    // Слишком короткое число после метки («паспорт № 5») — это не номер документа.
     if (digitCount < 6) continue
     for (const r of runs) {
       matches.push({
-        type: 'PASSPORT',
+        type: 'ID_DOC',
         value: window.slice(r.start, r.end),
         start: windowStart + r.start,
         end: windowStart + r.end,
@@ -685,7 +727,7 @@ function detectPassport(text: string): RawMatch[] {
   while ((sm = subdivisionRe.exec(text))) {
     const group = sm[1]
     const start = sm.index + sm[0].indexOf(group)
-    matches.push({ type: 'PASSPORT', value: group, start, end: start + group.length })
+    matches.push({ type: 'ID_DOC', value: group, start, end: start + group.length })
   }
 
   return matches
@@ -761,7 +803,7 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectRussianAccounts(text),
     ...detectUkrainianIds(text),
     ...detectSnils(text),
-    ...detectPassport(text),
+    ...detectIdDocument(text),
     ...detectWebsite(text),
     ...detectCard(text),
     ...detectSwift(text),
