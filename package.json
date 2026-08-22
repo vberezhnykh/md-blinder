@@ -9,6 +9,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
+    "ocr:models": "node scripts/fetch-ppocr-models.mjs",
+    "ocr:fixtures": "node scripts/make-ocr-fixtures.mjs",
+    "ocr:bench": "node scripts/bench-ocr.mjs",
     "postinstall": "patch-package"
   },
   "dependencies": {
@@ -21,6 +24,7 @@
     "codemirror": "^6.0.2",
     "gliner": "^0.0.19",
     "mammoth": "^1.12.0",
+    "onnxruntime-web": "1.19.2",
     "pdfjs-dist": "^6.1.200",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

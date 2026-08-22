@@ -863,3 +863,22 @@
   justify-content: flex-end;
 }
 .export-gate-dialog footer button { margin: 0; width: auto; }
+
+/* Выбор OCR-движка: строка под дропзоной, а не внутри — клик по дропзоне
+   открывает файловый диалог, и select внутри неё был бы недоступен. */
+.ocr-engine-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--pico-muted-color);
+}
+
+.ocr-engine-row select {
+  margin: 0;
+  width: auto;
+  padding: 4px 28px 4px 10px;
+  font-size: 13px;
+  background-position: right 8px center;
+}

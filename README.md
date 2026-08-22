@@ -11,6 +11,18 @@ npm install
 npm run dev
 ```
 
+## OCR-движки
+
+Сканы распознаются Tesseract.js. На ветке эксперимента доступен второй движок,
+PP-OCRv5 на onnxruntime-web (выбирается под дропзоной), и бенчмарк для их
+сравнения — см. [docs/ocr-engines.md](./docs/ocr-engines.md).
+
+```bash
+npm run ocr:models -- --bench   # веса моделей (в репозиторий не входят)
+npm run ocr:fixtures            # синтетические сканы для сравнения
+npm run ocr:bench               # таблица CER / WER / реквизиты (нужен npm run dev)
+```
+
 ## Сборка
 
 ```bash

@@ -47,3 +47,6 @@ progress*.log
 # sample-contract PII). Synthetic unit tests (*.test.ts with inline fake data) are
 # committed and run in CI; anything that reads test-samples/ lives here instead.
 tests/local/
+
+# OCR-модели качаются скриптом scripts/fetch-ppocr-models.mjs
+public/models/

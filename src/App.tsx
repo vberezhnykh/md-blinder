@@ -11,6 +11,7 @@ import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
 import { copyText } from './lib/clipboard'
+import { getOcrEngine, setOcrEngine, OCR_ENGINES, OCR_ENGINE_LABELS, type OcrEngineName } from './lib/ocr/engineChoice'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDoc } from './lib/history'
 import ReplacementTable from './components/ReplacementTable'
@@ -59,6 +60,7 @@ function App() {
   const [lastSecondPassAt, setLastSecondPassAt] = useState<number | null>(null)
   const [exportGate, setExportGate] = useState<(ExportGate & { passAt: number }) | null>(null)
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
+  const [ocrEngine, setOcrEngineState] = useState<OcrEngineName>(() => getOcrEngine())
   const gateDialogRef = useRef<HTMLDialogElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -464,6 +466,30 @@ function App() {
           {fileName && <p className="filename">Файл: {fileName}</p>}
         </div>
       ) : null}
+
+      {/* Движок OCR влияет только на сканы; текстовые PDF и docx идут мимо
+          него. PP-OCRv5 пока помечен бетой — см. docs/ocr-engines.md. */}
+      {!hasResult && (
+        <div className="ocr-engine-row">
+          <label htmlFor="ocr-engine">Движок OCR для сканов:</label>
+          <select
+            id="ocr-engine"
+            value={ocrEngine}
+            disabled={isLoading}
+            onChange={(e) => {
+              const next = e.target.value as OcrEngineName
+              setOcrEngineState(next)
+              setOcrEngine(next)
+            }}
+          >
+            {OCR_ENGINES.map((name) => (
+              <option key={name} value={name}>
+                {OCR_ENGINE_LABELS[name]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {!hasResult && (
         <HistoryPanel
