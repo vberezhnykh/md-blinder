@@ -3,6 +3,7 @@ import { loadPdf } from './pdf'
 import { OCR_LANGS } from './ocrLangs'
 import { stripRepeatedLinesAndPageNumbers } from './pdfStructure'
 import { getOcrEngine, type OcrEngineName } from './ocr/engineChoice'
+import { recognizePageWithTesseract } from './ocr/tesseract'
 import type { PpocrRequest, PpocrResponse } from '../workers/ppocr.worker'
 
 export interface OcrProgress {
@@ -86,7 +87,7 @@ async function createTesseractRecognizer(report: (pct: number) => void): Promise
     logger: (m: { status: string; progress: number }) => report(Math.round((m.progress ?? 0) * 100)),
   })
   return {
-    recognize: async (canvas) => (await worker.recognize(canvas)).data.text,
+    recognize: (canvas) => recognizePageWithTesseract(worker, canvas),
     dispose: async () => {
       await worker.terminate()
     },

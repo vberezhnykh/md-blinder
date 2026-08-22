@@ -3,6 +3,8 @@
 // (см. PdfTextItem), на выход — строка Markdown. Никаких импортов pdf.js —
 // это позволяет тестировать логику без браузера/воркера.
 
+import { looksLikeParallelColumns } from './parallelTable'
+
 export interface PdfTextItem {
   str: string
   x: number // левый край (pdf user space, transform[4])
@@ -294,11 +296,80 @@ function linesToBlocks(pagesLines: Line[][], bodySize: number): Block[] {
   return blocks
 }
 
+/**
+ * Ищет вертикальный «жёлоб» между колонками: полосу по всей высоте страницы,
+ * которую не пересекает ни один текстовый элемент. Двуязычный договор свёрстан
+ * в две колонки, и без такого разделения его строки читаются поперёк —
+ * «Настоящий Договор заключён This Agreement is made».
+ */
+function findColumnGutter(items: PdfTextItem[], bodySize: number): number | null {
+  const spans = items
+    .filter((i) => i.str.trim())
+    .map((i) => ({ left: i.x, right: i.x + i.w }))
+    .sort((a, b) => a.left - b.left)
+  if (spans.length < 4) return null
+
+  const pageLeft = spans[0].left
+  const pageRight = Math.max(...spans.map((s) => s.right))
+  const pageWidth = pageRight - pageLeft
+  if (pageWidth <= 0) return null
+
+  const minWidth = Math.max(2 * bodySize, 0.03 * pageWidth)
+  let best: { center: number; width: number } | null = null
+  let covered = spans[0].right
+  for (const span of spans) {
+    if (span.left > covered) {
+      const width = span.left - covered
+      const center = covered + width / 2
+      const position = (center - pageLeft) / pageWidth
+      // Только середина страницы: поля и абзацные отступы тоже дают пустоту.
+      if (position > 0.2 && position < 0.8 && width >= minWidth) {
+        if (!best || width > best.width) best = { center, width }
+      }
+    }
+    covered = Math.max(covered, span.right)
+  }
+  return best?.center ?? null
+}
+
+/**
+ * Строки страницы в порядке чтения. Для двуязычной двухколоночной вёрстки это
+ * сначала вся левая колонка, потом вся правая (признак «перевод, а не таблица
+ * данных» — общий с docx-конвейером, см. parallelTable.ts). Для всего
+ * остального — как было, в порядке pdf.js.
+ *
+ * Побочный эффект перестановки: колонтитул уезжает в конец своей колонки, то
+ * есть перестаёт быть последней строкой страницы, и подавление повторяющихся
+ * футеров его уже не поймает. Голые номера страниц вычищаются отдельно и от
+ * порядка не зависят.
+ */
+function buildPageLines(items: PdfTextItem[], bodySize: number): Line[] {
+  const gutter = findColumnGutter(items, bodySize)
+  if (gutter === null) return buildLines(items, bodySize)
+
+  const left = items.filter((i) => i.x + i.w / 2 < gutter)
+  const right = items.filter((i) => i.x + i.w / 2 >= gutter)
+  if (left.length === 0 || right.length === 0) return buildLines(items, bodySize)
+
+  const leftLines = buildLines(left, bodySize)
+  const rightLines = buildLines(right, bodySize)
+  if (leftLines.length === 0 || rightLines.length === 0) return buildLines(items, bodySize)
+
+  const leftText = leftLines.map((l) => l.text).join('\n')
+  const rightText = rightLines.map((l) => l.text).join('\n')
+  const averageLineLength =
+    (leftText.length + rightText.length) / (leftLines.length + rightLines.length)
+
+  return looksLikeParallelColumns(leftText, rightText, averageLineLength)
+    ? [...leftLines, ...rightLines]
+    : buildLines(items, bodySize)
+}
+
 export function itemsToMarkdown(pages: PdfTextItem[][]): string {
   const bodySize = detectBodySize(pages)
   if (bodySize === 0) return ''
 
-  const pagesLines = pages.map((items) => buildLines(items, bodySize))
+  const pagesLines = pages.map((items) => buildPageLines(items, bodySize))
   stripHeadersFooters(pagesLines)
 
   const blocks = linesToBlocks(pagesLines, bodySize)

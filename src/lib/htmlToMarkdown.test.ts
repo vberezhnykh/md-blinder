@@ -86,3 +86,50 @@ describe('htmlToMarkdown', () => {
     expect(md).not.toContain('<table')
   })
 })
+
+describe('двуязычные таблицы', () => {
+  const bilingualHtml = `
+    <table>
+      <tr>
+        <td><p>Настоящий Договор заключён между Сторонами в городе Санкт-Петербурге и вступает в силу с момента подписания обеими Сторонами.</p></td>
+        <td><p>This Agreement is made by and between the Parties in the city of Saint Petersburg and becomes effective upon signature by both Parties.</p></td>
+      </tr>
+      <tr>
+        <td><p>1. Исполнитель обязуется оказать услуги в объёме, предусмотренном Приложением № 1.</p><p>Срок — до 28 апреля 2026 года.</p></td>
+        <td><p>1. The Contractor shall render the services in the scope set out in Appendix No. 1.</p><p>Deadline — 28 April 2026.</p></td>
+      </tr>
+    </table>
+  `
+
+  it('разворачивает таблицу «русский | перевод» по колонкам, а не по строкам', () => {
+    const md = htmlToMarkdown(bilingualHtml)
+
+    expect(md).not.toContain('|')
+    const ruIndex = md.indexOf('Срок — до 28 апреля 2026 года.')
+    const enIndex = md.indexOf('This Agreement is made')
+    // Вся русская версия идёт до начала английской.
+    expect(ruIndex).toBeGreaterThan(-1)
+    expect(enIndex).toBeGreaterThan(ruIndex)
+  })
+
+  it('сохраняет абзацы внутри ячейки отдельными блоками', () => {
+    const md = htmlToMarkdown(bilingualHtml)
+
+    // turndown экранирует «1.» в начале абзаца, чтобы не получился список.
+    expect(md).toContain('1\\. Исполнитель обязуется оказать услуги')
+    expect(md).toContain('\n\nСрок — до 28 апреля 2026 года.')
+    expect(md).toContain('\n\nDeadline — 28 April 2026.')
+  })
+
+  it('обычную таблицу с данными оставляет таблицей', () => {
+    const md = htmlToMarkdown(`
+      <table>
+        <tr><td><p>Наименование</p></td><td><p>Стоимость</p></td></tr>
+        <tr><td><p>Насос центробежный КМ 80-50-200</p></td><td><p>212 400,00</p></td></tr>
+      </table>
+    `)
+
+    expect(md).toContain('| Наименование | Стоимость |')
+    expect(md).toContain('| Насос центробежный КМ 80-50-200 | 212 400,00 |')
+  })
+})

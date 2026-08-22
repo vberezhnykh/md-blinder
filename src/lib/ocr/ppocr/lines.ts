@@ -1,6 +1,7 @@
-// Сборка распознанных кусков в текст страницы. Детектор возвращает рамки в
-// произвольном порядке, а дальше по конвейеру идёт NER по строкам, которому
-// нужен нормальный порядок чтения: сверху вниз, слева направо.
+// Переход от рамок PP-OCR (четырёхугольники, возможно повёрнутые) к общему
+// для движков представлению фрагмента текста. Порядок чтения и колонки —
+// в ocr/pageText.ts, чтобы Tesseract и PP-OCR собирали страницу одинаково.
+import { boxesToText as boxesToPageText, type TextBox } from '../pageText'
 import type { Point } from './geometry'
 
 export interface RecognizedBox {
@@ -9,67 +10,18 @@ export interface RecognizedBox {
   confidence: number
 }
 
-interface Placed {
-  box: RecognizedBox
-  top: number
-  bottom: number
-  left: number
-  centerY: number
-  height: number
-}
-
-function place(box: RecognizedBox): Placed {
-  const ys = box.points.map((p) => p[1])
+export function toTextBox(box: RecognizedBox): TextBox {
   const xs = box.points.map((p) => p[0])
-  const top = Math.min(...ys)
-  const bottom = Math.max(...ys)
+  const ys = box.points.map((p) => p[1])
   return {
-    box,
-    top,
-    bottom,
+    text: box.text,
     left: Math.min(...xs),
-    centerY: (top + bottom) / 2,
-    height: bottom - top,
+    right: Math.max(...xs),
+    top: Math.min(...ys),
+    bottom: Math.max(...ys),
   }
 }
 
-/**
- * Группирует рамки в строки. Критерий — центр рамки попадает по вертикали
- * внутрь уже набранной строки с допуском в долю её высоты: у одной текстовой
- * строки базовые линии совпадают, а колонки таблицы честно расходятся по X и
- * остаются в той же строке (что правильно — это одна строка таблицы).
- */
-export function groupIntoLines(boxes: RecognizedBox[], tolerance = 0.5): RecognizedBox[][] {
-  const placed = boxes.map(place).sort((a, b) => a.centerY - b.centerY || a.left - b.left)
-  const lines: Placed[][] = []
-  for (const item of placed) {
-    const current = lines[lines.length - 1]
-    if (current) {
-      const ref = current[current.length - 1]
-      const limit = Math.max(ref.height, item.height) * tolerance
-      if (Math.abs(item.centerY - ref.centerY) <= limit) {
-        current.push(item)
-        continue
-      }
-    }
-    lines.push([item])
-  }
-  return lines.map((line) => line.sort((a, b) => a.left - b.left).map((p) => p.box))
-}
-
-/**
- * Текст страницы. Внутри строки куски разделяются пробелом: детектор режет
- * строку по словам/фрагментам, и без пробела «ИНН» и номер слипаются, что
- * ломает регулярки в детекторах структурных данных.
- */
 export function boxesToText(boxes: RecognizedBox[], tolerance = 0.5): string {
-  return groupIntoLines(boxes, tolerance)
-    .map((line) =>
-      line
-        .map((b) => b.text.trim())
-        .filter(Boolean)
-        .join(' '),
-    )
-    .filter(Boolean)
-    .join('\n')
+  return boxesToPageText(boxes.map(toTextBox), tolerance)
 }

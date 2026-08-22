@@ -5,6 +5,7 @@
 import { createWorker } from 'tesseract.js'
 import { OCR_LANGS } from '../ocrLangs'
 import { PpocrEngine, type PpocrOptions, type PpocrPaths } from './ppocr/engine'
+import { recognizePageWithTesseract } from './tesseract'
 
 export interface BenchResult {
   text: string
@@ -30,8 +31,8 @@ export async function benchTesseract(
   })
   try {
     const started = performance.now()
-    const { data } = await worker.recognize(canvas)
-    return { text: data.text.trim(), ms: performance.now() - started }
+    const text = await recognizePageWithTesseract(worker, canvas)
+    return { text: text.trim(), ms: performance.now() - started }
   } finally {
     await worker.terminate()
   }
@@ -57,4 +58,23 @@ export async function benchPpocr(
   const started = performance.now()
   const { text } = await engine.recognize(canvas)
   return { text: text.trim(), ms: performance.now() - started }
+}
+
+/** Геометрия рамок детектора — для отладки постобработки в bench-скриптах. */
+export async function debugPpocrBoxes(
+  canvas: HTMLCanvasElement,
+): Promise<{ text: string; left: number; top: number; width: number; height: number }[]> {
+  const engine = new PpocrEngine()
+  const { boxes } = await engine.recognize(canvas)
+  return boxes.map((b) => {
+    const xs = b.points.map((p) => p[0])
+    const ys = b.points.map((p) => p[1])
+    return {
+      text: b.text,
+      left: Math.round(Math.min(...xs)),
+      top: Math.round(Math.min(...ys)),
+      width: Math.round(Math.max(...xs) - Math.min(...xs)),
+      height: Math.round(Math.max(...ys) - Math.min(...ys)),
+    }
+  })
 }

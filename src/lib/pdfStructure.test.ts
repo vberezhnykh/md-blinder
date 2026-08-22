@@ -318,3 +318,69 @@ describe('stripRepeatedLinesAndPageNumbers', () => {
     expect(pages).toEqual(snapshot)
   })
 })
+
+describe('itemsToMarkdown: двуязычные колонки', () => {
+  // Договор с переводом: слева русская версия, справа английская, элементы от
+  // pdf.js идут поперёк — строка левой колонки, строка правой, и так далее.
+  const RU = [
+    'Настоящий Договор заключён между Сторонами в городе Санкт-Петербурге',
+    'и вступает в силу с момента его подписания обеими Сторонами Договора.',
+    'Исполнитель обязуется оказать услуги в объёме Приложения номер один.',
+  ]
+  const EN = [
+    'This Agreement is made by and between the Parties in Saint Petersburg',
+    'and shall become effective upon its signature by both Parties hereto.',
+    'The Contractor shall render the services in the scope of Appendix one.',
+  ]
+
+  function twoColumnPage(): PdfTextItem[] {
+    const items: PdfTextItem[] = []
+    RU.forEach((ru, i) => {
+      const y = 300 - i * 14
+      items.push(makeItem({ str: ru, x: 0, y, w: 240, hasEOL: false }))
+      items.push(makeItem({ str: EN[i], x: 300, y, w: 240, hasEOL: true }))
+    })
+    return items
+  }
+
+  it('читает по колонкам, а не поперёк строк', () => {
+    const md = itemsToMarkdown([twoColumnPage()])
+
+    expect(md).not.toContain('Санкт-Петербурге This Agreement')
+    const lastRu = md.indexOf('Приложения номер один')
+    const firstEn = md.indexOf('This Agreement is made')
+    expect(lastRu).toBeGreaterThan(-1)
+    expect(firstEn).toBeGreaterThan(lastRu)
+  })
+
+  it('склеивает строки внутри колонки в абзац', () => {
+    const md = itemsToMarkdown([twoColumnPage()])
+
+    expect(md).toContain('в городе Санкт-Петербурге и вступает в силу')
+    expect(md).toContain('in Saint Petersburg and shall become effective')
+  })
+
+  it('не переставляет одноязычную страницу с двумя колонками подписей', () => {
+    const page: PdfTextItem[] = [
+      makeItem({ str: 'Заказчик:', x: 0, y: 200, w: 60 }),
+      makeItem({ str: 'Исполнитель:', x: 300, y: 200, w: 70, hasEOL: true }),
+      makeItem({ str: 'Прокофьев И. В.', x: 0, y: 180, w: 90 }),
+      makeItem({ str: 'Гаврилова Н. С.', x: 300, y: 180, w: 90, hasEOL: true }),
+    ]
+    const md = itemsToMarkdown([page])
+
+    expect(md).toContain('Заказчик: Исполнитель:')
+  })
+
+  it('не переставляет таблицу с цифрами', () => {
+    const page: PdfTextItem[] = [
+      makeItem({ str: 'Насос центробежный КМ 80-50-200, четыре штуки, поставка', x: 0, y: 200, w: 240 }),
+      makeItem({ str: '212 400,00 рублей включая налог на добавленную стоимость', x: 300, y: 200, w: 240, hasEOL: true }),
+      makeItem({ str: 'Задвижка стальная 30с41нж Ду150, двенадцать штук, склад', x: 0, y: 186, w: 240 }),
+      makeItem({ str: '89 750,50 рублей включая налог на добавленную стоимость', x: 300, y: 186, w: 240, hasEOL: true }),
+    ]
+    const md = itemsToMarkdown([page])
+
+    expect(md).toContain('Насос центробежный КМ 80-50-200, четыре штуки, поставка 212 400,00')
+  })
+})

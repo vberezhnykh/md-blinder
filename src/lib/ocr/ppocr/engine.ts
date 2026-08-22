@@ -293,17 +293,18 @@ export class PpocrEngine {
       for (let y = 0; y < REC_HEIGHT; y++) {
         for (let x = 0; x < batchW; x++) {
           const dst = y * batchW + x
-          // Узкие кропы добиваются белым, а не нулями: нулевой пиксель после
-          // нормализации это чёрный, и модель дорисовывает несуществующие
-          // символы в хвосте строки.
-          const inside = x < width
+          // Хвост узкого кропа в пачке остаётся нулём — так добивает и сам
+          // PaddleOCR. Ноль здесь не чёрный: после нормализации (x/255-0.5)/0.5
+          // это нейтрально-серый, ровно то, на чём модель обучалась. Заливка
+          // белым (1.0) выглядит логичнее, но именно она портила распознавание:
+          // в пачке из строк разной длины короткие превращались в мусор
+          // («Kazan, the fifth day of May» -> «cYaananncnlob»), а длинные,
+          // которым добивать почти нечего, читались правильно.
+          if (x >= width) continue
           const si = (y * width + x) * 4
-          const r = inside ? img[si] : 255
-          const g = inside ? img[si + 1] : 255
-          const bl = inside ? img[si + 2] : 255
-          input[base + dst] = (r / 255 - 0.5) / 0.5
-          input[base + plane + dst] = (g / 255 - 0.5) / 0.5
-          input[base + 2 * plane + dst] = (bl / 255 - 0.5) / 0.5
+          input[base + dst] = (img[si] / 255 - 0.5) / 0.5
+          input[base + plane + dst] = (img[si + 1] / 255 - 0.5) / 0.5
+          input[base + 2 * plane + dst] = (img[si + 2] / 255 - 0.5) / 0.5
         }
       }
     }

@@ -79,6 +79,47 @@ const PAGES = [
       'СНИЛС исполнителя: 145-872-336 41. Контакт: +7 917 843-22-56.',
     ],
   },
+  {
+    name: 'contract-bilingual-columns',
+    fontSize: 19,
+    noise: 8,
+    columns: [
+      [
+        'ДОГОВОР ПОСТАВКИ № 118/2026',
+        'город Казань, пятое мая две тысячи',
+        'двадцать шестого года.',
+        'Общество с ограниченной ответственностью',
+        '«Волжский Стандарт», ИНН 1655043921,',
+        'в лице директора Сафина Рустема',
+        'Ильдаровича, действующего на основании',
+        'Устава, именуемое Поставщик, и',
+        'компания Nordwind Trading Ltd.,',
+        'именуемая Покупатель, заключили',
+        'настоящий Договор о нижеследующем.',
+        '1. Цена партии составляет 2 340 000',
+        'рублей, включая НДС 20 процентов.',
+        '2. Оплата на счёт 40702810600000098765',
+        'в АО «Тинькофф Банк», БИК 044525974.',
+      ],
+      [
+        'SUPPLY AGREEMENT No. 118/2026',
+        'Kazan, the fifth day of May',
+        'two thousand twenty six.',
+        'Limited liability company',
+        'Volzhsky Standard, INN 1655043921,',
+        'represented by its director Rustem',
+        'Safin acting under the Articles of',
+        'Association, the Supplier, and',
+        'Nordwind Trading Ltd.,',
+        'the Buyer, have entered into',
+        'this Agreement as follows.',
+        '1. The price of the lot is 2,340,000',
+        'roubles including VAT of 20 percent.',
+        '2. Payment to account 40702810600000098765',
+        'with Tinkoff Bank, BIC 044525974.',
+      ],
+    ],
+  },
 ]
 
 const html = `<!doctype html><meta charset="utf-8"><body style="margin:0"><canvas id="c"></canvas></body>`
@@ -94,7 +135,8 @@ for (const spec of PAGES) {
     const width = 1240
     const lineHeight = Math.round(s.fontSize * 1.7)
     const margin = 60
-    const height = margin * 2 + lineHeight * s.lines.length
+    const rows = s.columns ? Math.max(...s.columns.map((c) => c.length)) : s.lines.length
+    const height = margin * 2 + lineHeight * rows
     const canvas = document.getElementById('c')
     canvas.width = width
     canvas.height = height
@@ -116,9 +158,19 @@ for (const spec of PAGES) {
     ctx.fillStyle = `rgb(${level},${level},${level})`
     ctx.font = `${s.fontSize}px "Liberation Serif", "DejaVu Serif", serif`
     ctx.textBaseline = 'top'
-    s.lines.forEach((line, i) => {
-      ctx.fillText(line, margin, margin + i * lineHeight)
-    })
+    if (s.columns) {
+      // Две колонки с широким жёлобом посередине — так верстают договоры с
+      // переводом, и именно на такой странице OCR раньше читал поперёк.
+      const columnWidth = (width - margin * 2 - 80) / 2
+      s.columns.forEach((lines, col) => {
+        const x = margin + col * (columnWidth + 80)
+        lines.forEach((line, i) => ctx.fillText(line, x, margin + i * lineHeight))
+      })
+    } else {
+      s.lines.forEach((line, i) => {
+        ctx.fillText(line, margin, margin + i * lineHeight)
+      })
+    }
     ctx.filter = 'none'
     ctx.setTransform(1, 0, 0, 1, 0, 0)
 
@@ -138,7 +190,10 @@ for (const spec of PAGES) {
 
   const png = Buffer.from(dataUrl.split(',')[1], 'base64')
   writeFileSync(join(outDir, `${spec.name}.png`), png)
-  writeFileSync(join(outDir, `${spec.name}.txt`), spec.lines.join('\n') + '\n')
+  // Эталон для двухколоночной страницы — порядок по колонкам: сначала одна
+  // языковая версия целиком, потом другая.
+  const gold = spec.columns ? spec.columns.flat() : spec.lines
+  writeFileSync(join(outDir, `${spec.name}.txt`), gold.join('\n') + '\n')
   console.log(`+ ${join(outDir, spec.name)}.png/.txt (${(png.length / 1024).toFixed(0)} КБ)`)
 }
 
