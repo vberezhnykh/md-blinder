@@ -418,6 +418,24 @@ function App() {
         onChange={handleFileInput}
       />
 
+      {/* Индикатор процесса и ошибки — первым блоком и sticky: в истории могут
+          быть десятки документов, и раньше прогресс уезжал под них, так что о
+          том, что файл вообще обрабатывается, узнавали только проскроллив. */}
+      {(status === 'loading' || status === 'error') && (
+        <div className="status-bar">
+          {status === 'loading' && (
+            <>
+              <p className="status status-loading" aria-live="polite">
+                <span className="spinner" aria-hidden="true" />
+                {statusLabel(progress, elapsedSec)}
+              </p>
+              {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
+            </>
+          )}
+          {status === 'error' && <p className="status error">{error}</p>}
+        </div>
+      )}
+
       {!hasResult && (
         <header className="app-header">
           <h1>MD Blinder</h1>
@@ -478,17 +496,6 @@ function App() {
           </button>
         </div>
       )}
-
-      {status === 'loading' && (
-        <>
-          <p className="status status-loading" aria-live="polite">
-            <span className="spinner" aria-hidden="true" />
-            {statusLabel(progress, elapsedSec)}
-          </p>
-          {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
-        </>
-      )}
-      {status === 'error' && <p className="status error">{error}</p>}
 
       {hasResult && (
         <section className="result" data-last-pass={lastSecondPassAt ?? undefined}>

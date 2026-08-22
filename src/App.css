@@ -139,8 +139,25 @@
   padding: 2px 6px;
 }
 
+/* Прогресс закреплён вверху страницы: список истории может быть длинным, а
+   индикатор должен оставаться на виду при скролле. */
+.status-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--paper);
+  padding: 14px 0 12px;
+  margin-bottom: -6px;
+  /* Мягкая тень отделяет закреплённый индикатор от уезжающего под него списка. */
+  box-shadow: 0 10px 12px -12px rgba(0, 0, 0, 0.45);
+}
+
 .status {
   margin-top: 16px;
+}
+
+.status-bar .status {
+  margin-top: 0;
 }
 
 .status-hint {
