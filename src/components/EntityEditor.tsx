@@ -6,6 +6,13 @@ import { Decoration, type DecorationSet, hoverTooltip, WidgetType } from '@codem
 import { StateEffect, StateField } from '@codemirror/state'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 import { snapToWordBoundary } from '../lib/wordSnap'
+import {
+  entityMetadataField,
+  entityMetadataHistory,
+  entitySyncTransaction,
+  externalEntitySync,
+  setEntityMetadata,
+} from '../lib/entityEditorState'
 
 interface EntityEditorProps {
   value: string
@@ -39,12 +46,18 @@ interface MergePopupState {
   top: number
 }
 
-interface EntitiesEffectValue {
-  entities: Entity[]
-  active: ActiveSpan | null
-}
+const setActiveSpanEffect = StateEffect.define<ActiveSpan | null>()
 
-const setEntitiesEffect = StateEffect.define<EntitiesEffectValue>()
+const activeSpanField = StateField.define<ActiveSpan | null>({
+  create: () => null,
+  update(active, transaction) {
+    if (transaction.docChanged) active = null
+    for (const effect of transaction.effects) {
+      if (effect.is(setActiveSpanEffect)) active = effect.value
+    }
+    return active
+  },
+})
 
 class EntityHandleWidget extends WidgetType {
   side: 'left' | 'right'
@@ -110,11 +123,11 @@ function buildDecorations(entities: Entity[], active: ActiveSpan | null): Decora
 }
 
 const entityDecorationField = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
+  create: (state) => buildDecorations(state.field(entityMetadataField), null),
   update(deco, tr) {
-    deco = deco.map(tr.changes)
-    for (const eff of tr.effects)
-      if (eff.is(setEntitiesEffect)) deco = buildDecorations(eff.value.entities, eff.value.active)
+    if (tr.docChanged || tr.effects.some((effect) => effect.is(setEntityMetadata) || effect.is(setActiveSpanEffect))) {
+      return buildDecorations(tr.state.field(entityMetadataField), tr.state.field(activeSpanField))
+    }
     return deco
   },
   provide: (f) => EditorView.decorations.from(f),
@@ -177,6 +190,13 @@ function EntityEditor({
     if (!mountRef.current) return
 
     const updateListener = EditorView.updateListener.of((update) => {
+      const nextEntities = update.state.field(entityMetadataField)
+      entitiesRef.current = nextEntities
+      if (update.docChanged) {
+        setActiveSpan(null)
+        setMergePopup(null)
+        setSelectionPopup(null)
+      }
       if (update.selectionSet) {
         const sel = update.state.selection.main
         setHasSelection(!sel.empty)
@@ -244,18 +264,10 @@ function EntityEditor({
           setMergePickerOpen(false)
         }
       }
-      if (!update.docChanged) return
-      const changes = update.changes
-      const nextText = update.state.doc.toString()
-      const nextEntities = entitiesRef.current
-        .map((e) => {
-          const positions = e.positions
-            .map((p) => ({ start: changes.mapPos(p.start, 1), end: changes.mapPos(p.end, -1) }))
-            .filter((p) => p.end > p.start)
-          return { ...e, positions }
-        })
-        .filter((e) => e.positions.length > 0)
-      onChangeRef.current(nextText, nextEntities)
+      const metadataChanged = nextEntities !== update.startState.field(entityMetadataField)
+      if ((update.docChanged || metadataChanged) && !update.transactions.every((tr) => tr.annotation(externalEntitySync))) {
+        onChangeRef.current(update.state.doc.toString(), nextEntities)
+      }
     })
 
     const tooltip = hoverTooltip((_view, pos) => {
@@ -351,7 +363,7 @@ function EntityEditor({
           })
           currentPos = nextPos
           setActiveSpan({ entityId: active.entityId, start: nextPos.start, end: nextPos.end })
-          onChangeRef.current(view.state.doc.toString(), nextEntities)
+          view.dispatch({ effects: setEntityMetadata.of(nextEntities) })
         }
 
         const onMouseMove = (e: MouseEvent) => {
@@ -376,6 +388,9 @@ function EntityEditor({
         basicSetup,
         markdown(),
         EditorView.lineWrapping,
+        entityMetadataField.init(() => entitiesRef.current),
+        entityMetadataHistory,
+        activeSpanField,
         entityDecorationField,
         tooltip,
         dragHandlers,
@@ -384,7 +399,6 @@ function EntityEditor({
       ],
     })
     viewRef.current = view
-    view.dispatch({ effects: setEntitiesEffect.of({ entities: entitiesRef.current, active: activeSpanRef.current }) })
 
     const handleScroll = () => {
       const current = selectionPopupRef.current
@@ -420,16 +434,19 @@ function EntityEditor({
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    view.dispatch({ effects: setEntitiesEffect.of({ entities, active: activeSpan }) })
-  }, [entities, activeSpan])
+    view.dispatch({ effects: setActiveSpanEffect.of(activeSpan) })
+  }, [activeSpan])
 
   useEffect(() => {
     const view = viewRef.current
     if (!view) return
-    if (view.state.doc.toString() !== value) {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } })
-    }
-  }, [value])
+    const textChanged = view.state.doc.toString() !== value
+    if (!textChanged && view.state.field(entityMetadataField) === entities) return
+    view.dispatch(entitySyncTransaction(
+      entities,
+      textChanged ? { from: 0, to: view.state.doc.length, insert: value } : undefined,
+    ))
+  }, [value, entities])
 
   useEffect(() => {
     const view = viewRef.current

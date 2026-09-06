@@ -1,10 +1,15 @@
-import { detectStructural } from './regexDetectors'
+import { detectStructuralAsync } from './structuralClient'
 import { detectEntitiesNer, type NerProgress } from './ner'
 import { filterGenericNerMatches } from './nerFilter'
 import { stitchAddressRuns } from './stitchAddress'
 import { buildAnonymizedTextWithMap, mapAnonRangeToSource, nextPlaceholderNumber } from './apply'
-import { normalizeValue } from './index'
+import { normalizeValue } from './normalizeValue'
 import type { Entity, EntityType, RawMatch } from './types'
+
+export interface SecondPassResult {
+  entities: Entity[]
+  nerFailed: boolean
+}
 
 // B2 «контрольный проход». Прогоняет весь конвейер детекции по УЖЕ анонимизированному
 // тексту (плейсхолдеры игнорируются), пересчитывает находки обратно в офсеты
@@ -14,17 +19,24 @@ export async function runSecondPass(
   sourceText: string,
   entities: Entity[],
   onProgress?: (p: NerProgress) => void,
-): Promise<Entity[]> {
-  if (!sourceText) return []
+  signal?: AbortSignal,
+): Promise<SecondPassResult> {
+  signal?.throwIfAborted()
+  if (!sourceText) return { entities: [], nerFailed: false }
   const { text: anon, segments } = buildAnonymizedTextWithMap(sourceText, entities)
 
-  const structural = detectStructural(anon)
+  const structural = await detectStructuralAsync(anon, signal)
   let ner: RawMatch[] = []
+  let nerFailed = false
   try {
-    ner = await detectEntitiesNer(anon, onProgress)
-  } catch {
+    ner = await detectEntitiesNer(anon, onProgress, signal)
+  } catch (error) {
+    signal?.throwIfAborted()
+    if (error instanceof Error && error.name === 'AbortError') throw error
+    nerFailed = true
     ner = []
   }
+  signal?.throwIfAborted()
   const nerFiltered = stitchAddressRuns(filterGenericNerMatches(ner), anon)
 
   // Пересчёт находок в исходные офсеты; отбрасываем то, что задевает плейсхолдеры.
@@ -36,18 +48,15 @@ export async function runSecondPass(
   }
 
   // Уже покрытые позиции (существующие сущности, включая кандидатов) — не пропуски.
-  const overlapsExisting = (s: number, e: number): boolean =>
-    entities.some((x) => x.positions.some((p) => s < p.end && p.start < e))
-  // Значения, уже известные как сущность того же типа — не дублируем (шум); их
-  // повторные вхождения — забота B3 (родственные вхождения), не B2.
-  const knownKeys = new Set(entities.map((x) => `${x.type} ${normalizeValue(x.type, x.value)}`))
+  // Deduplicate positions, not values: knowing a name once does not protect its
+  // other occurrences. Dismissed positions remain claimed so decisions persist.
+  const claimed = entities.flatMap((e) => e.positions)
 
   interface G { type: EntityType; firstValue: string; firstStart: number; positions: { start: number; end: number }[] }
   const groups = new Map<string, G>()
   for (const m of mapped) {
-    if (overlapsExisting(m.start, m.end)) continue
+    if (claimed.some((p) => m.start < p.end && p.start < m.end)) continue
     const key = `${m.type} ${normalizeValue(m.type, m.value)}`
-    if (knownKeys.has(key)) continue
     let g = groups.get(key)
     if (!g) {
       g = { type: m.type, firstValue: m.value, firstStart: m.start, positions: [] }
@@ -56,6 +65,7 @@ export async function runSecondPass(
     // непересекающиеся позиции внутри группы
     if (!g.positions.some((p) => m.start < p.end && p.start < m.end)) {
       g.positions.push({ start: m.start, end: m.end })
+      claimed.push({ start: m.start, end: m.end })
       g.firstStart = Math.min(g.firstStart, m.start)
     }
   }
@@ -79,5 +89,5 @@ export async function runSecondPass(
     working.push(entity)
     result.push(entity)
   }
-  return result
+  return { entities: result, nerFailed }
 }

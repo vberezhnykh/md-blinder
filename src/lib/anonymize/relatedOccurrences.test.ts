@@ -86,7 +86,7 @@ describe('findRelatedOccurrences', () => {
     expect(result).toHaveLength(0)
   })
 
-  it('не пересоздаёт кандидата, если нормализованное значение уже есть среди сущностей', () => {
+  it('находит повтор известного значения на ещё не покрытой позиции', () => {
     const sourceText =
       'Иванов Иван Иванович подписал акт. Отчёт передала Иванова. Позже Иванова заходила снова.'
     const fullName = 'Иванов Иван Иванович'
@@ -108,7 +108,23 @@ describe('findRelatedOccurrences', () => {
 
     const result = findRelatedOccurrences(sourceText, [entity1, entity2])
 
-    expect(result.find((e) => e.value === 'Иванова')).toBeUndefined()
+    const repeat = result.find((e) => e.value === 'Иванова')
+    expect(repeat).toBeDefined()
+    expect(repeat!.positions).toEqual([{ start: sourceText.lastIndexOf('Иванова'), end: sourceText.lastIndexOf('Иванова') + 7 }])
+  })
+
+  it('находит полные повторные имена и компании, сохраняя отклонённые позиции', () => {
+    const text = 'Acme approved. Acme signed. Acme confirmed.'
+    const active = makeEntity({ type: 'COMPANY', value: 'Acme', placeholder: '[COMPANY_1]', positions: [{ start: 0, end: 4 }] })
+    const dismissed = makeEntity({ type: 'COMPANY', value: 'Acme', placeholder: '[COMPANY_2]', positions: [{ start: 15, end: 19 }], anonymize: false, dismissed: true })
+    const result = findRelatedOccurrences(text, [active, dismissed])
+    expect(result).toHaveLength(1)
+    expect(result[0].positions).toEqual([{ start: 28, end: 32 }])
+    expect(result[0].value).toBe('Acme')
+
+    const personText = 'Alice Smith. Alice Smith.'
+    const person = makeEntity({ type: 'PERSON', value: 'Alice Smith', placeholder: '[PERSON_1]', positions: [{ start: 0, end: 11 }] })
+    expect(findRelatedOccurrences(personText, [person])[0].positions).toEqual([{ start: 13, end: 24 }])
   })
 
   it('нумерует плейсхолдер кандидата вслед за существующими сущностями того же типа', () => {

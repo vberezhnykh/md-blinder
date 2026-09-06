@@ -7,23 +7,30 @@ const turndownService = new TurndownService({
 })
 turndownService.use(gfm)
 
+// Markdown tables cannot contain physical line breaks. Let Turndown convert
+// every child (including lists and images), then flatten only the resulting
+// cell boundaries. No text sentinel is needed, so literal {{BR}} is untouched.
+turndownService.addRule('tableCellContent', {
+  filter: ['td', 'th'],
+  replacement(content, node) {
+    const value = content.trim().replace(/\r?\n\s*\n?/g, '<br>').replace(/\|/g, '\\|')
+    const first = node.parentNode?.firstChild === node
+    return `${first ? '| ' : ' '}${value} |`
+  },
+})
+
+turndownService.addRule('tableLineBreak', {
+  filter: (node) => node.nodeName === 'BR' && !!node.closest('td, th'),
+  replacement: () => '<br>',
+})
+
 // mammoth emits <td> header cells wrapped in <p>. turndown-plugin-gfm only
 // converts tables whose first row is all <th>, otherwise it keeps them as raw
-// HTML. Preprocess: flatten paragraphs inside cells (multi-paragraph cells keep
-// line breaks via a {{BR}} sentinel restored to <br> after conversion), and
-// promote the first row to a <thead> of <th> so gfm converts the table.
+// HTML. Promote the first row to a <thead> of <th> so gfm converts the table.
+// Keep every child and its ordering; cell conversion handles block boundaries.
 export function preprocessTableHtml(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   doc.querySelectorAll('table').forEach((table) => {
-    table.querySelectorAll('td, th').forEach((cell) => {
-      const paras = cell.querySelectorAll('p')
-      if (paras.length) {
-        const parts = Array.from(paras)
-          .map((p) => p.innerHTML.trim())
-          .filter(Boolean)
-        cell.innerHTML = parts.join('{{BR}}')
-      }
-    })
     if (!table.querySelector('thead')) {
       const firstRow = table.querySelector('tr')
       if (firstRow) {
@@ -44,7 +51,5 @@ export function preprocessTableHtml(html: string): string {
 }
 
 export function htmlToMarkdown(html: string): string {
-  return turndownService
-    .turndown(preprocessTableHtml(html))
-    .replace(/\{\{BR\}\}/g, '<br>')
+  return turndownService.turndown(preprocessTableHtml(html))
 }

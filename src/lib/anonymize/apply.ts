@@ -1,11 +1,10 @@
 import type { Entity, EntityType } from './types'
 import { findPlaceholderRanges, escapePlaceholderLiteral } from './placeholderGuard'
+import { findImageRanges, IMAGE_REMOVED_MARKER } from './imageSafety'
 
 // Replace every ACTIVE (anonymize:true) entity occurrence with its placeholder,
-// splicing back-to-front so earlier offsets stay valid. This assumes positions
-// are non-overlapping; as a safety net against a broken invariant (e.g. a
-// hand-edited import), any replacement that overlaps the previously-accepted
-// one (scanning right-to-left) is skipped rather than double-splicing.
+// preserving source offsets. Overlapping redactions are unioned so a broken
+// invariant in imported data cannot expose the uncovered part of an entity.
 export function buildAnonymizedText(sourceText: string, entities: Entity[]): string {
   return buildAnonymizedTextWithMap(sourceText, entities).text
 }
@@ -20,13 +19,16 @@ export interface AnonSegment {
 
 // Как buildAnonymizedText, но дополнительно возвращает карту сегментов для
 // обратного пересчёта офсетов (нужно контрольному проходу B2). Порядок разрешения
-// пересечений тот же (скан справа-налево, побеждает больший start), поэтому текст
+// пересечений тот же, поэтому текст
 // побайтово совпадает с buildAnonymizedText.
 export function buildAnonymizedTextWithMap(
   sourceText: string,
   entities: Entity[],
 ): { text: string; segments: AnonSegment[] } {
   const repl: { start: number; end: number; placeholder: string }[] = []
+  for (const image of findImageRanges(sourceText)) {
+    repl.push({ ...image, placeholder: IMAGE_REMOVED_MARKER })
+  }
   for (const e of entities) {
     if (!e.anonymize) continue
     for (const p of e.positions) repl.push({ start: p.start, end: p.end, placeholder: e.placeholder })
@@ -43,25 +45,23 @@ export function buildAnonymizedTextWithMap(
     repl.push({ start: rng.start, end: rng.end, placeholder: escapePlaceholderLiteral(sourceText.slice(rng.start, rng.end)) })
   }
 
-  // Разрешение пересечений — тот же алгоритм, что в старой buildAnonymizedText
-  // (скан по убыванию start, побеждает уже принятый = с большим start).
-  repl.sort((a, b) => b.start - a.start)
-  const acceptedDesc: typeof repl = []
-  let prevStart = Infinity
-  let droppedOverlap = false
+  // Union overlaps; images have priority over every entity/literal inside them.
+  repl.sort((a, b) => a.start - b.start || b.end - a.end)
+  const accepted: typeof repl = []
+  let mergedOverlap = false
   for (const r of repl) {
-    if (r.end <= prevStart) {
-      acceptedDesc.push(r)
-      prevStart = r.start
+    const prev = accepted[accepted.length - 1]
+    if (prev && r.start < prev.end) {
+      prev.end = Math.max(prev.end, r.end)
+      if (r.placeholder === IMAGE_REMOVED_MARKER) prev.placeholder = IMAGE_REMOVED_MARKER
+      mergedOverlap = true
     } else {
-      droppedOverlap = true
+      accepted.push({ ...r })
     }
   }
-  if (droppedOverlap) {
-    console.warn('buildAnonymizedText: dropped overlapping replacement(s) to avoid double-splicing')
+  if (mergedOverlap) {
+    console.warn('buildAnonymizedText: merged overlapping redactions to preserve coverage')
   }
-
-  const accepted = acceptedDesc.slice().sort((a, b) => a.start - b.start)
   let out = ''
   let src = 0
   const segments: AnonSegment[] = []
@@ -171,8 +171,8 @@ export function addEntityFromSelection(
 
 // Attach one occurrence [from,to] to an EXISTING entity (by id) so it shares that
 // entity's placeholder, instead of creating a new entity. The span is absorbed
-// away from any OTHER entity that overlaps it (so it isn't redacted twice), then
-// added to the target's positions unless it already overlaps one of them.
+// away from any OTHER entity that overlaps it. Union the entire affected ranges
+// first, including active neighbours, so no already-redacted text becomes visible.
 export function addOccurrenceToEntity(
   entities: Entity[],
   _sourceText: string,
@@ -181,23 +181,40 @@ export function addOccurrenceToEntity(
   entityId: string,
 ): Entity[] {
   if (to <= from) return entities
-  if (!entities.some((e) => e.id === entityId)) return entities
+  const target = entities.find((e) => e.id === entityId)
+  if (!target) return entities
 
-  const working = entities
-    .map((e) => {
-      if (e.id === entityId) return e
-      const positions = e.positions.filter((p) => !(from < p.end && p.start < to))
-      return { ...e, positions }
-    })
-    .filter((e) => e.id === entityId || e.positions.length > 0)
+  let start = from
+  let end = to
+  let anonymize = target.anonymize
+  // Union connected components once; repeatedly expanding the selection across
+  // a chain of overlaps would otherwise require a quadratic number of sweeps.
+  const spans = entities.flatMap((e) => e.positions.map((p) => ({ ...p, active: e.anonymize })))
+    .sort((a, b) => a.start - b.start)
+  const components: typeof spans = []
+  for (const span of spans) {
+    const previous = components[components.length - 1]
+    if (previous && span.start < previous.end) {
+      previous.end = Math.max(previous.end, span.end)
+      previous.active ||= span.active
+    } else components.push({ ...span })
+  }
+  for (const span of components) {
+    if (span.start >= end) break
+    if (start < span.end) {
+      start = Math.min(start, span.start)
+      end = Math.max(end, span.end)
+      anonymize ||= span.active
+    }
+  }
 
-  return working.map((e) => {
-    if (e.id !== entityId) return e
-    const overlapsExisting = e.positions.some((p) => from < p.end && p.start < to)
-    if (overlapsExisting) return e
-    const positions = [...e.positions, { start: from, end: to }].sort((a, b) => a.start - b.start)
-    return { ...e, positions }
-  })
+  return entities.map((e) => {
+    const positions = e.positions.filter((p) => !(start < p.end && p.start < end))
+    if (e.id !== entityId) return positions.length === e.positions.length ? e : { ...e, positions }
+    positions.push({ start, end })
+    positions.sort((a, b) => a.start - b.start)
+    return { ...e, positions, anonymize, ...(anonymize ? { candidate: false, dismissed: false } : {}) }
+  }).filter((e) => e.positions.length > 0)
 }
 
 // Recolor an entity to a new type, recomputing its placeholder against the

@@ -253,12 +253,12 @@ describe('itemsToMarkdown: header/footer and page-number suppression', () => {
         fontSize: BODY_SIZE,
         hasEOL: true,
       }),
-      makeItem({ str: String(n), x: 0, y: 40, w: 10, fontSize: BODY_SIZE, hasEOL: true }),
+      makeItem({ str: String(n), x: 0, y: 20, w: 10, fontSize: BODY_SIZE, hasEOL: true }),
     ]
 
     const pages: PdfTextItem[][] = [makePage(1), makePage(2), makePage(3)]
 
-    const md = itemsToMarkdown(pages)
+    const md = itemsToMarkdown(pages, [1, 2, 3].map((pageNumber) => ({ bottom: 0, height: 320, pageNumber, totalPages: 3 })))
 
     expect(md).not.toContain('Sample Contract Header')
     expect(md).toContain('Body paragraph number 1')
@@ -278,7 +278,28 @@ describe('itemsToMarkdown: edge cases', () => {
 })
 
 describe('stripRepeatedLinesAndPageNumbers', () => {
-  it('drops a header line repeated on all pages, drops bare page-number lines, keeps unique body lines', () => {
+  it('preserves amounts, bank accounts and page-like text in the body of OCR output', () => {
+    const lines = ['Bank account:', '40702810900000012345', 'Payment amount:', '50000', 'Page 3 describes payment.', 'End of contract.']
+    expect(stripRepeatedLinesAndPageNumbers([lines])).toEqual([lines])
+    const numberedBody = ['Intro', '1', 'Page 2', 'Closing']
+    expect(stripRepeatedLinesAndPageNumbers([numberedBody])).toEqual([numberedBody])
+  })
+
+  it('keeps numeric body lines even when their value matches a physical page number', () => {
+    const page = ['Payment amount:', '1', '50000', '40702810900000012345', 'Closing.'].map((str, i) =>
+      makeItem({ str, y: 600 - i * 30, hasEOL: true }),
+    )
+    const md = itemsToMarkdown([page], [{ bottom: 0, height: 800, pageNumber: 1, totalPages: 1 }])
+    expect(md.split('\n\n')).toContain('1')
+    expect(md).toContain('50000')
+    expect(md).toContain('40702810900000012345')
+  })
+
+  it('keeps an amount at the page edge if it does not match the page index', () => {
+    const page = [makeItem({ str: 'Amount payable', y: 100, hasEOL: true }), makeItem({ str: '5000', y: 20 })]
+    expect(itemsToMarkdown([page], [{ bottom: 0, height: 800, pageNumber: 1, totalPages: 1 }])).toContain('5000')
+  })
+  it('drops repeated headers and explicit page labels, preserving unlocated numeric values', () => {
     const pages = [
       ['Sample Contract Header', 'Body paragraph number 1 for the synthetic sample text.', '12'],
       ['Sample Contract Header', 'Body paragraph number 2 for the synthetic sample text.', 'Page 3'],
@@ -288,13 +309,13 @@ describe('stripRepeatedLinesAndPageNumbers', () => {
     const result = stripRepeatedLinesAndPageNumbers(pages)
 
     expect(result).toEqual([
-      ['Body paragraph number 1 for the synthetic sample text.'],
+      ['Body paragraph number 1 for the synthetic sample text.', '12'],
       ['Body paragraph number 2 for the synthetic sample text.'],
-      ['Body paragraph number 3 for the synthetic sample text.'],
+      ['Body paragraph number 3 for the synthetic sample text.', '14'],
     ])
   })
 
-  it('with fewer than 3 pages still drops bare page-number lines but does not suppress repeats', () => {
+  it('with fewer than 3 pages drops only explicit boundary labels and does not suppress repeats', () => {
     const pages = [
       ['Sample Contract Header', 'Body paragraph one for the synthetic sample text.', '1'],
       ['Sample Contract Header', 'Body paragraph two for the synthetic sample text.', 'Page 2'],
@@ -303,10 +324,11 @@ describe('stripRepeatedLinesAndPageNumbers', () => {
     const result = stripRepeatedLinesAndPageNumbers(pages)
 
     // Repeated header stays (only >=3 pages triggers repeat-suppression)...
-    expect(result[0]).toEqual(['Sample Contract Header', 'Body paragraph one for the synthetic sample text.'])
+    expect(result[0]).toEqual(['Sample Contract Header', 'Body paragraph one for the synthetic sample text.', '1'])
     expect(result[1]).toEqual(['Sample Contract Header', 'Body paragraph two for the synthetic sample text.'])
-    // ...but the bare page-number lines are still gone.
-    expect(result.flat().some((line) => /^\d+$/.test(line) || /^page\s+\d+/i.test(line))).toBe(false)
+    // Bare numbers need geometry to distinguish page numbers from amounts.
+    expect(result[0]).toContain('1')
+    expect(result.flat()).not.toContain('Page 2')
   })
 
   it('does not mutate the input arrays', () => {

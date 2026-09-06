@@ -15,6 +15,27 @@ beforeEach(() => {
 })
 
 describe('anonymizeMarkdown', () => {
+  it('passes cancellation through without downgrading it to failed NER', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(anonymizeMarkdown('Acme', undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockedDetectEntitiesNer).not.toHaveBeenCalled()
+    mockedDetectEntitiesNer.mockRejectedValueOnce(new DOMException('Cancelled', 'AbortError'))
+    await expect(anonymizeMarkdown('Acme')).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('preserves occurrence coverage for a large interleaved set of structural and NER matches', async () => {
+    const markdown = Array.from({ length: 1000 }, (_, i) => `Person${i} person${i}@example.com`).join('\n')
+    const matches: RawMatch[] = [...markdown.matchAll(/Person\d+/g)].map((match) => ({ type: 'PERSON', value: match[0], start: match.index, end: match.index + match[0].length }))
+    // Duplicates and a broad overlap must not steal adjacent structural matches.
+    matches.push({ type: 'PERSON', value: markdown, start: 0, end: markdown.length })
+    mockedDetectEntitiesNer.mockResolvedValueOnce([...matches, ...matches])
+    const { result } = await anonymizeMarkdown(markdown)
+    expect(result.entities.filter((e) => e.type === 'EMAIL')).toHaveLength(1000)
+    expect(result.entities.filter((e) => e.type === 'PERSON')).toHaveLength(1000)
+    expect(result.markdown).not.toContain('@example.com')
+    expect(result.markdown).not.toMatch(/Person\d+/)
+  })
   it('merges duplicate NER matches into one entity and numbers types independently', async () => {
     const markdown = 'Acme Ltd pays Acme Ltd via john@x.com'
     const companyValue = 'Acme Ltd'

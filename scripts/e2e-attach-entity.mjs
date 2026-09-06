@@ -33,10 +33,12 @@ try {
     const req = indexedDB.open('md-blinder')
     req.onerror = () => reject(req.error)
     req.onsuccess = () => {
-      const tx = req.result.transaction('documents', 'readwrite')
+      const db = req.result
+      const tx = db.transaction(['documents', 'documentMeta'], 'readwrite')
       tx.objectStore('documents').put(doc)
-      tx.oncomplete = () => resolve(true)
-      tx.onerror = () => reject(tx.error)
+      tx.objectStore('documentMeta').put({ id: doc.id, name: doc.name, format: doc.format, createdAt: doc.createdAt, updatedAt: doc.updatedAt, entityCount: doc.entities.length })
+      tx.oncomplete = () => { db.close(); resolve(true) }
+      tx.onabort = tx.onerror = () => { db.close(); reject(tx.error) }
     }
   }), { docName, ENT_ID })
 

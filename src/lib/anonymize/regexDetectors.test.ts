@@ -1,7 +1,40 @@
 import { describe, it, expect } from 'vitest'
-import { detectStructural } from './regexDetectors'
+import { detectEmail, detectStructural } from './regexDetectors'
 
 describe('detectStructural', () => {
+  it.each(['Телефон: +79161234567', 'Тел.: 89161234567', 'Телефон: 0671234567', 'Мобільний: 0671234567', '+79161234567', '+380671234567'])('detects compact contact phones: %s', (text) => {
+    const phone = detectStructural(text).filter((m) => m.type === 'PHONE')
+    expect(phone).toHaveLength(1)
+    expect(phone[0].value).toBe(text.split(/: ?/).at(-1))
+    expect(text.slice(phone[0].start, phone[0].end)).toBe(phone[0].value)
+  })
+
+  it.each(['Оплата: 89161234567', 'Телефон: 1234567890123456', '+1234567890123456', 'Телефонизация: 89161234567', 'Счёт: 40702810338000246070', 'Дата: 06.09.2026'])('does not invent a compact telephone or truncate a longer number: %s', (text) => {
+    expect(detectStructural(text).some((m) => m.type === 'PHONE')).toBe(false)
+  })
+
+  it.each(['UA21 3223 1300 0002 6007 2335 6600 1', 'ua21 3223 1300 0002 6007 2335 6600 1', 'gb82 west 1234 5698 7654 32', 'DE89 3704 0044 0532 0130 00'])('covers complete printed IBAN without partial lower-priority matches: %s', (iban) => {
+    const text = `IBAN: ${iban} end`
+    const matches = detectStructural(text)
+    expect(matches.filter((m) => m.type === 'IBAN')).toEqual([{ type: 'IBAN', value: iban, start: 6, end: 6 + iban.length }])
+    expect(matches.some((m) => m.type !== 'IBAN' && m.start < 6 + iban.length && m.end > 6)).toBe(false)
+  })
+
+  it('never accepts a checksum-valid prefix of a longer IBAN or an oversized ACCOUNT', () => {
+    expect(detectStructural('IBAN GB82WEST123456987654321').some((m) => m.type === 'IBAN')).toBe(false)
+    expect(detectStructural(`Account: ${'1234 '.repeat(10)}1234`).some((m) => m.type === 'ACCOUNT')).toBe(false)
+    const text = 'IBAN: UA00 3223 1300 0002 6007 2335 6600 1'
+    const account = detectStructural(text).find((m) => m.type === 'ACCOUNT')
+    expect(account?.value).toBe(text.slice(6))
+  })
+
+  it('scans long OCR fragments around @ with exact offsets', () => {
+    const source = `${'x'.repeat(64000)} no-email ${'a'.repeat(64000)}@invalid; alice@example.com.`
+    const started = performance.now()
+    expect(detectEmail(source)).toEqual([{ type: 'EMAIL', value: 'alice@example.com', start: source.indexOf('alice@example.com'), end: source.length - 1 }])
+    // Very loose guard (old unanchored search exceeded 1.8 s for half this input).
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
   it('detects an email address', () => {
     const matches = detectStructural('Contact john.doe@acme.co for details')
     const emails = matches.filter((m) => m.type === 'EMAIL')

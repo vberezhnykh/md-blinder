@@ -1,5 +1,6 @@
 import { nextPlaceholderNumber } from './apply'
-import { normalizeValue } from './index'
+import { normalizeValue } from './normalizeValue'
+import { maskImagesForDetection } from './imageSafety'
 import type { Entity } from './types'
 
 // B3: поиск «родственных» вхождений подтверждённых сущностей — недетектированных
@@ -128,21 +129,22 @@ function phoneForms(value: string): Form[] {
 }
 
 function formsFor(entity: Entity): Form[] {
+  const exact = [wordForm(entity.value, 2)]
   switch (entity.type) {
-    case 'PERSON': return personForms(entity.value)
-    case 'COMPANY': return companyForms(entity.value)
-    case 'EMAIL': return emailForms(entity.value)
-    case 'PHONE': return phoneForms(entity.value)
-    default: return []
+    case 'PERSON': return [...exact, ...personForms(entity.value)]
+    case 'COMPANY': return [...exact, ...companyForms(entity.value)]
+    case 'EMAIL': return [...exact, ...emailForms(entity.value)]
+    case 'PHONE': return [...exact, ...phoneForms(entity.value)]
+    default: return exact
   }
 }
 
 export function findRelatedOccurrences(sourceText: string, entities: Entity[]): Entity[] {
-  const sources = entities.filter((e) => !e.candidate && e.anonymize)
+  const sources = entities.filter((e) => !e.candidate && !e.dismissed && e.anonymize)
+  const searchableText = maskImagesForDetection(sourceText)
   const claimed: { start: number; end: number }[] = entities.flatMap((e) =>
     e.positions.map((p) => ({ start: p.start, end: p.end })),
   )
-  const knownKeys = new Set(entities.map((e) => `${e.type} ${normalizeValue(e.type, e.value)}`))
   const working: Entity[] = [...entities]
   const result: Entity[] = []
 
@@ -159,7 +161,7 @@ export function findRelatedOccurrences(sourceText: string, entities: Entity[]): 
     for (const form of formsFor(src)) {
       form.pattern.lastIndex = 0
       let m: RegExpExecArray | null
-      while ((m = form.pattern.exec(sourceText)) !== null) {
+      while ((m = form.pattern.exec(searchableText)) !== null) {
         const text = m[0]
         if (text.length === 0) {
           form.pattern.lastIndex++
@@ -170,7 +172,6 @@ export function findRelatedOccurrences(sourceText: string, entities: Entity[]): 
         if (text.length < form.minLen) continue
         if (claimed.some((c) => start < c.end && c.start < end)) continue
         const key = `${src.type} ${normalizeValue(src.type, text)}`
-        if (knownKeys.has(key)) continue
         let g = groups.get(key)
         if (!g) {
           g = { type: src.type, note: `Похоже на ${src.placeholder}`, firstValue: text, firstStart: start, positions: [] }

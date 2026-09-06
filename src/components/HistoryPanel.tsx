@@ -1,11 +1,11 @@
 import { useRef } from 'react'
-import type { HistoryDoc } from '../lib/history'
+import type { HistoryDocMeta } from '../lib/history'
 
 interface HistoryPanelProps {
-  docs: HistoryDoc[]
+  docs: HistoryDocMeta[]
   currentId: string | null
   errorText?: string
-  onOpen: (doc: HistoryDoc) => void
+  onOpen: (doc: HistoryDocMeta) => void
   onDelete: (id: string) => void
   onExport: () => void
   onImport: (file: File) => void
@@ -52,9 +52,9 @@ function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, 
               {doc.name}
             </span>
             <span className="history-meta">
-              {new Date(doc.updatedAt).toLocaleString('ru-RU')} · {doc.entities.length} сущностей · {doc.format}
+              {new Date(doc.updatedAt).toLocaleString('ru-RU')} · {doc.entityCount} сущностей · {doc.format}
             </span>
-            <button type="button" disabled={doc.id === currentId} onClick={() => onOpen(doc)}>
+            <button type="button" onClick={() => onOpen(doc)}>
               {doc.id === currentId ? 'Открыт' : 'Открыть'}
             </button>
             <button

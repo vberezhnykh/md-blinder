@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
@@ -35,8 +35,25 @@ function EntityList({
 }: EntityListProps) {
   const [mergeSource, setMergeSource] = useState<string | null>(null)
   const [mergeTarget, setMergeTarget] = useState('')
-  const confirmed = entities.filter((e) => !e.candidate && !e.dismissed)
-  const candidates = entities.filter((e) => e.candidate && !e.dismissed)
+  const { confirmed, candidates, byType } = useMemo(() => {
+    const confirmed: Entity[] = []
+    const candidates: Entity[] = []
+    const byType = new Map<EntityType, Entity[]>()
+    for (const entity of entities) {
+      if (entity.dismissed) continue
+      if (entity.candidate) {
+        candidates.push(entity)
+      } else {
+        confirmed.push(entity)
+        const group = byType.get(entity.type)
+        if (group) group.push(entity)
+        else byType.set(entity.type, [entity])
+      }
+    }
+    confirmed.sort((a, b) => minStart(a) - minStart(b))
+    candidates.sort((a, b) => minStart(a) - minStart(b))
+    return { confirmed, candidates, byType }
+  }, [entities])
 
   if (!confirmed.length && !candidates.length) {
     return (
@@ -47,14 +64,12 @@ function EntityList({
     )
   }
 
-  const sorted = [...confirmed].sort((a, b) => minStart(a) - minStart(b))
-
   return (
     <div className="entity-pane">
       <h3>Сущности ({confirmed.length})</h3>
-      {sorted.map((entity) => {
+      {confirmed.map((entity) => {
         const value = entityCurrentValue(sourceText, entity)
-        const sameType = confirmed.filter((e) => e.type === entity.type)
+        const sameType = byType.get(entity.type)!
         const canMerge = sameType.length >= 2 && !!onMergeEntity
         const isMerging = mergeSource === entity.id
         return (
@@ -182,9 +197,7 @@ function EntityList({
       {candidates.length > 0 && (
         <div className="candidates-section">
           <h3>Проверьте вручную ({candidates.length})</h3>
-          {[...candidates]
-            .sort((a, b) => minStart(a) - minStart(b))
-            .map((entity) => {
+          {candidates.map((entity) => {
               const value = entityCurrentValue(sourceText, entity)
               return (
                 <div className="entity-row candidate-row" key={entity.id}>

@@ -87,7 +87,7 @@ describe('buildAnonymizedText', () => {
     expect(result).toBe('Email [EMAIL_1] and phone [PHONE_1] today')
   })
 
-  it('drops one of two overlapping replacements instead of double-splicing', () => {
+  it('unions overlapping replacements without exposing their uncovered parts', () => {
     const sourceText = 'Contact Jane Doe today'
     // Overlapping positions: a broken invariant that should never happen via
     // normal app flow, but must not corrupt the output if it ever does.
@@ -112,6 +112,7 @@ describe('buildAnonymizedText', () => {
     const hasPerson = result.includes('[PERSON_1]')
     const hasOther = result.includes('[OTHER_1]')
     expect(hasPerson !== hasOther).toBe(true)
+    expect(result).toBe('Contact [PERSON_1]')
     expect(warnSpy).toHaveBeenCalled()
 
     warnSpy.mockRestore()
@@ -327,6 +328,27 @@ describe('addEntityFromSelection', () => {
 })
 
 describe('addOccurrenceToEntity', () => {
+  it('expands the target over a neighbouring redaction instead of exposing it', () => {
+    const sourceText = 'Acme Beta'
+    const target = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_1]', positions: [{ start: 0, end: 4 }] })
+    const neighbour = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_2]', positions: [{ start: 5, end: 9 }] })
+    const result = addOccurrenceToEntity([target, neighbour], sourceText, 0, 9, target.id)
+    expect(result).toHaveLength(1)
+    expect(result[0].positions).toEqual([{ start: 0, end: 9 }])
+    expect(buildAnonymizedText(sourceText, result)).toBe('[COMPANY_1]')
+    expect(target.positions).toEqual([{ start: 0, end: 4 }])
+  })
+
+  it('retains the full coverage of a partially overlapped active neighbour when the target was inactive', () => {
+    const sourceText = 'Acme Beta Gamma'
+    const target = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_1]', positions: [{ start: 0, end: 4 }], anonymize: false, candidate: true })
+    const neighbour = makeEntity({ type: 'COMPANY', placeholder: '[COMPANY_2]', positions: [{ start: 5, end: 15 }] })
+    const result = addOccurrenceToEntity([target, neighbour], sourceText, 2, 7, target.id)
+    expect(result[0].positions).toEqual([{ start: 0, end: 15 }])
+    expect(result[0].anonymize).toBe(true)
+    expect(result[0].candidate).toBe(false)
+    expect(buildAnonymizedText(sourceText, result)).toBe('[COMPANY_1]')
+  })
   it('attaches a span to the target entity, sharing its placeholder', () => {
     const sourceText = 'Acme Ltd works with Acme Corp'
     const target = makeEntity({

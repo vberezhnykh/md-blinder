@@ -21,4 +21,12 @@ describe('classifyPdfPages', () => {
   it('returns an empty array for an empty document', () => {
     expect(classifyPdfPages([])).toEqual([])
   })
+
+  it('routes a large scanned image with only a text header to OCR', () => {
+    expect(classifyPdfPages([
+      { nonWsCount: 48, bodyNonWsCount: 0, textAreaRatio: 0.005, imageAreaRatio: 0.8 },
+      { nonWsCount: 800, bodyNonWsCount: 740, textAreaRatio: 0.09, imageAreaRatio: 1 },
+      { nonWsCount: 48, bodyNonWsCount: 0, textAreaRatio: 0.005, imageAreaRatio: 0.01 },
+    ])).toEqual(['ocr', 'text', 'text'])
+  })
 })

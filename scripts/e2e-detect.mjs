@@ -43,7 +43,7 @@ for (const file of files) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
 
   // Upload the file into the hidden <input type=file>
-  await page.setInputFiles('input[type=file]', file)
+  await page.locator('input[type=file][accept=".docx,.pdf"]').setInputFiles(file)
 
   // Wait until processing actually starts (loading spinner appears), then
   // until it finishes (spinner gone AND a result/error is shown). Polling by
@@ -58,7 +58,7 @@ for (const file of files) {
   while (Date.now() < deadline) {
     await page.waitForTimeout(1500)
     const loading = await page.$('.status-loading').then((el) => !!el)
-    const result = await page.$('.result').then((el) => !!el)
+    const result = await page.locator('.result').isVisible()
     const err = await page.$('.status.error').then((el) => !!el)
     if (loading) sawLoading = true
     // Heartbeat every ~10s so a long NER run visibly progresses (and a hang is obvious).
@@ -68,7 +68,7 @@ for (const file of files) {
       const phase = loading ? 'processing' : sawLoading ? 'settling' : 'uploading'
       console.error(`  ...${basename(file)} [${phase}] ${elapsed}s elapsed`)
     }
-    if (!loading && (result || err) && (sawLoading || err)) {
+    if (!loading && (result || err)) {
       finished = true
       break
     }
@@ -77,7 +77,8 @@ for (const file of files) {
   await page.waitForTimeout(1000)
 
   const errText = await page.$eval('.status.error', (el) => el.textContent).catch(() => null)
-  const nerNotice = await page.$('.ner-notice').then((el) => !!el)
+  const nerNotice = await page.locator('.ner-notice').filter({ hasText: 'NER-модель' }).count().then((count) => count > 0)
+  const anonymizedText = await page.$eval('.anonymized-preview', (el) => el.textContent).catch(() => null)
 
   // Confirmed detections only — candidate rows also carry the .entity-row
   // class, so they must be excluded here to stay comparable to the
@@ -104,28 +105,43 @@ for (const file of files) {
   // matches have score undefined) so an offline threshold sweep (C3) can
   // reclassify confirmed-vs-candidate without re-running NER. Give the app's
   // initial putDoc a moment to commit before we look.
-  await page.waitForTimeout(500)
+  await page.waitForFunction(() => document.querySelector('.compact-bar [role="status"]')?.textContent === 'Сохранено в браузере', null, { timeout: 10000 }).catch(() => {})
   const persisted = await page
     .evaluate(
-      (minUpdatedAt) =>
+      ({ minUpdatedAt, fileName }) =>
         new Promise((resolve) => {
+          let db = null
+          let settled = false
+          const finish = (value) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timeout)
+            db?.close()
+            resolve(value)
+          }
+          const timeout = setTimeout(() => finish(null), 10000)
           try {
             const req = indexedDB.open('md-blinder')
-            req.onerror = () => resolve(null)
+            req.onerror = () => finish(null)
+            req.onblocked = () => finish(null)
             req.onsuccess = () => {
-              const db = req.result
+              db = req.result
+              if (settled) { db.close(); return }
               try {
                 const tx = db.transaction('documents', 'readonly')
                 const store = tx.objectStore('documents')
                 const getAllReq = store.getAll()
-                getAllReq.onerror = () => resolve(null)
+                let captured = null
+                tx.oncomplete = () => finish(captured)
+                tx.onabort = tx.onerror = () => finish(null)
+                getAllReq.onerror = () => finish(null)
                 getAllReq.onsuccess = () => {
                   const records = getAllReq.result || []
                   // Only records written by THIS file's run are eligible —
                   // anything older is a stale doc from a previous file that
                   // shared this IndexedDB context and must be ignored.
-                  const fresh = records.filter((r) => (r.updatedAt || 0) >= minUpdatedAt)
-                  if (!fresh.length) return resolve({ sourceText: '', scored: [] })
+                  const fresh = records.filter((r) => r.name === fileName && (r.updatedAt || 0) >= minUpdatedAt)
+                  if (!fresh.length) return
                   let best = fresh[0]
                   for (const r of fresh) {
                     if ((r.updatedAt || 0) > (best.updatedAt || 0)) best = r
@@ -135,19 +151,22 @@ for (const file of files) {
                     value: e.value,
                     score: typeof e.score === 'number' ? e.score : null,
                     candidate: e.candidate === true,
+                    anonymize: e.anonymize === true,
+                    dismissed: e.dismissed === true,
+                    placeholder: e.placeholder,
                     positions: Array.isArray(e.positions) ? e.positions : [],
                   }))
-                  resolve({ sourceText: best.sourceText ?? '', scored })
+                  captured = { sourceText: best.sourceText ?? '', scored }
                 }
               } catch {
-                resolve(null)
+                finish(null)
               }
             }
           } catch {
-            resolve(null)
+            finish(null)
           }
         }),
-      fileStart,
+      { minUpdatedAt: fileStart, fileName: basename(file) },
     )
     .catch(() => null)
   const sourceText = persisted?.sourceText ?? null
@@ -161,6 +180,7 @@ for (const file of files) {
     entities,
     candidates,
     sourceText,
+    anonymizedText,
     scored,
     pageErrors: errors.slice(0, 10),
   }

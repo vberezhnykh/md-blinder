@@ -87,8 +87,9 @@ describe('runSecondPass', () => {
     ]
     mockedDetectEntitiesNer.mockResolvedValueOnce(nerMatches)
 
-    const found = await runSecondPass(sourceText, entities)
+    const { entities: found, nerFailed } = await runSecondPass(sourceText, entities)
 
+    expect(nerFailed).toBe(false)
     expect(found).toHaveLength(1)
     const entity = found[0]
     expect(entity.type).toBe('COMPANY')
@@ -100,11 +101,10 @@ describe('runSecondPass', () => {
     expect(sourceText.slice(entity.positions[0].start, entity.positions[0].end)).toBe('Beta Corp')
   })
 
-  it('B2: skips a NER match whose normalized value is already a known entity of the same type, even at a non-overlapping position', async () => {
+  it('B2: reports a repeated known value at an uncovered position', async () => {
     // "Acme Ltd" appears twice; the first pass only caught the first occurrence
     // (as a candidate, left verbatim — anonymize:false), so the second occurrence
-    // stays in the clear in the anon text. The known-value dedup (not the
-    // position-overlap guard) must be what suppresses it as a "miss".
+    // stays in the clear in the anon text and must be offered for review.
     const sourceText = 'Acme Ltd trades as acme@acme.com. Also known as Acme Ltd internally.'
     const firstAcmeStart = sourceText.indexOf('Acme Ltd')
     const emailValue = 'acme@acme.com'
@@ -143,8 +143,40 @@ describe('runSecondPass', () => {
     ]
     mockedDetectEntitiesNer.mockResolvedValueOnce(nerMatches)
 
-    const found = await runSecondPass(sourceText, entities)
+    const { entities: found } = await runSecondPass(sourceText, entities)
 
-    expect(found).toEqual([])
+    expect(found).toHaveLength(1)
+    expect(found[0].value).toBe('Acme Ltd')
+    expect(found[0].positions).toEqual([{ start: sourceText.lastIndexOf('Acme Ltd'), end: sourceText.lastIndexOf('Acme Ltd') + 8 }])
+    expect(found[0].candidate).toBe(true)
+  })
+
+  it('keeps dismissed positions dismissed while surfacing other repeated positions', async () => {
+    const text = 'Acme approved. Acme signed. Acme confirmed.'
+    const known: Entity[] = [{ id: 'dismissed', type: 'COMPANY', value: 'Acme', placeholder: '[COMPANY_1]',
+      anonymize: false, manual: false, dismissed: true, positions: [{ start: 0, end: 4 }] }]
+    mockedDetectEntitiesNer.mockResolvedValueOnce([...text.matchAll(/Acme/g)].map((match) => ({
+      type: 'COMPANY', value: 'Acme', start: match.index, end: match.index + 4,
+    })))
+    const { entities } = await runSecondPass(text, known)
+    expect(entities).toHaveLength(1)
+    expect(entities[0].positions).toEqual([{ start: 15, end: 19 }, { start: 28, end: 32 }])
+    expect(known[0].dismissed).toBe(true)
+  })
+
+  it('reports NER failure explicitly while retaining structural findings', async () => {
+    mockedDetectEntitiesNer.mockRejectedValueOnce(new Error('model unavailable'))
+    const result = await runSecondPass('Contact alice@example.com', [])
+    expect(result.nerFailed).toBe(true)
+    expect(result.entities.map((e) => e.value)).toContain('alice@example.com')
+  })
+
+  it('aborts before detection and never downgrades cancellation to NER failure', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(runSecondPass('Acme', [], undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mockedDetectEntitiesNer).not.toHaveBeenCalled()
+    mockedDetectEntitiesNer.mockRejectedValueOnce(new DOMException('Cancelled', 'AbortError'))
+    await expect(runSecondPass('Acme', [])).rejects.toMatchObject({ name: 'AbortError' })
   })
 })

@@ -11,22 +11,60 @@ export interface HistoryDoc {
 }
 
 const DB_NAME = 'md-blinder'
-const DB_VERSION = 1
+export type HistoryDocMeta = Omit<HistoryDoc, 'sourceText' | 'entities'> & { entityCount: number }
+
+const DB_VERSION = 2
 const STORE = 'documents'
+const META_STORE = 'documentMeta'
 export const EXPORT_VERSION = 1
+let connection: Promise<IDBDatabase> | null = null
+
+function docMeta(doc: HistoryDoc): HistoryDocMeta {
+  const { sourceText: _text, entities, ...meta } = doc
+  return { ...meta, entityCount: entities.length }
+}
 
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (connection) return connection
+  connection = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION)
+    let blocked = false
+    req.onblocked = () => {
+      blocked = true
+      reject(new Error('Обновление истории заблокировано другой вкладкой. Закройте старые вкладки MD Blinder и повторите попытку.'))
+    }
     req.onupgradeneeded = () => {
       const db = req.result
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' })
       }
+      if (!db.objectStoreNames.contains(META_STORE)) {
+        const metadata = db.createObjectStore(META_STORE, { keyPath: 'id' })
+        const cursor = req.transaction!.objectStore(STORE).openCursor()
+        cursor.onsuccess = () => {
+          const current = cursor.result
+          if (!current) return
+          metadata.put(docMeta(current.value as HistoryDoc))
+          current.continue()
+        }
+      }
     }
-    req.onsuccess = () => resolve(req.result)
+    req.onsuccess = () => {
+      const db = req.result
+      // An open request cannot be cancelled. If an older tab unblocks it after
+      // we reported the error, do not retain this now-unobserved connection.
+      if (blocked) { db.close(); return }
+      db.onversionchange = () => { db.close(); if (connection === opening) connection = null }
+      db.onclose = () => { if (connection === opening) connection = null }
+      resolve(db)
+    }
     req.onerror = () => reject(req.error)
   })
+  const opening = connection
+  // Promise executors also catch synchronous SecurityError from indexedDB.open.
+  // Do not permanently cache that rejected opening attempt.
+  void opening.catch(() => { if (connection === opening) connection = null })
+  return opening
 }
 
 function wrapRequest<T>(req: IDBRequest<T>): Promise<T> {
@@ -36,26 +74,58 @@ function wrapRequest<T>(req: IDBRequest<T>): Promise<T> {
   })
 }
 
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onabort = () => reject(tx.error ?? new Error('Сохранение отменено хранилищем браузера'))
+    tx.onerror = () => reject(tx.error ?? new Error('Ошибка хранилища браузера'))
+  })
+}
+
+export async function loadDoc(id: string): Promise<HistoryDoc | undefined> {
+  const db = await openDb()
+  const tx = db.transaction(STORE, 'readonly')
+  const [doc] = await Promise.all([
+    wrapRequest(tx.objectStore(STORE).get(id) as IDBRequest<HistoryDoc | undefined>),
+    transactionDone(tx),
+  ])
+  return doc ? { ...doc, entities: sanitizeEntities(doc.entities, doc.sourceText.length) } : undefined
+}
+
+export async function loadHistoryMetadata(): Promise<HistoryDocMeta[]> {
+  const db = await openDb()
+  const tx = db.transaction(META_STORE, 'readonly')
+  const [docs] = await Promise.all([
+    wrapRequest(tx.objectStore(META_STORE).getAll() as IDBRequest<HistoryDocMeta[]>),
+    transactionDone(tx),
+  ])
+  return docs.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
 export async function loadAllDocs(): Promise<HistoryDoc[]> {
   const db = await openDb()
   const tx = db.transaction(STORE, 'readonly')
   const store = tx.objectStore(STORE)
-  const docs = await wrapRequest(store.getAll() as IDBRequest<HistoryDoc[]>)
+  const [docs] = await Promise.all([wrapRequest(store.getAll() as IDBRequest<HistoryDoc[]>), transactionDone(tx)])
   return docs.slice().sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 export async function putDoc(doc: HistoryDoc): Promise<void> {
   const db = await openDb()
-  const tx = db.transaction(STORE, 'readwrite')
-  const store = tx.objectStore(STORE)
-  await wrapRequest(store.put(doc))
+  const tx = db.transaction([STORE, META_STORE], 'readwrite')
+  const done = transactionDone(tx)
+  tx.objectStore(STORE).put(doc)
+  tx.objectStore(META_STORE).put(docMeta(doc))
+  await done
 }
 
 export async function deleteDoc(id: string): Promise<void> {
   const db = await openDb()
-  const tx = db.transaction(STORE, 'readwrite')
-  const store = tx.objectStore(STORE)
-  await wrapRequest(store.delete(id))
+  const tx = db.transaction([STORE, META_STORE], 'readwrite')
+  const done = transactionDone(tx)
+  tx.objectStore(STORE).delete(id)
+  tx.objectStore(META_STORE).delete(id)
+  await done
 }
 
 export function serializeHistory(docs: HistoryDoc[]): string {
@@ -71,7 +141,7 @@ const INVALID_EXPORT_ERROR = 'Файл не похож на экспорт ис�
 // Never throws: a malformed entity is dropped rather than crashing the import.
 // Unknown types are coerced to OTHER; positions are filtered to well-formed
 // { start, end } pairs, and an entity left with none is dropped entirely.
-export function sanitizeEntities(raw: unknown): Entity[] {
+export function sanitizeEntities(raw: unknown, sourceLength = Infinity): Entity[] {
   if (!Array.isArray(raw)) return []
   const result: Entity[] = []
   for (const item of raw) {
@@ -93,7 +163,7 @@ export function sanitizeEntities(raw: unknown): Entity[] {
         const pos = (typeof p === 'object' && p !== null ? p : {}) as Record<string, unknown>
         return { start: Number(pos.start), end: Number(pos.end) }
       })
-      .filter((p) => Number.isFinite(p.start) && Number.isFinite(p.end) && p.start < p.end)
+      .filter((p) => Number.isInteger(p.start) && Number.isInteger(p.end) && p.start >= 0 && p.start < p.end && p.end <= sourceLength)
     if (positions.length === 0) continue
 
     const out: Entity = {
@@ -129,6 +199,9 @@ export function parseHistory(json: string): HistoryDoc[] {
   if (obj.app !== 'md-blinder' || obj.kind !== 'history' || !Array.isArray(obj.documents)) {
     throw new Error(INVALID_EXPORT_ERROR)
   }
+  if (obj.version !== undefined && obj.version !== EXPORT_VERSION) {
+    throw new Error('Версия экспорта истории не поддерживается. Обновите приложение.')
+  }
 
   return obj.documents.map((raw): HistoryDoc => {
     if (typeof raw !== 'object' || raw === null) {
@@ -151,7 +224,7 @@ export function parseHistory(json: string): HistoryDoc[] {
       createdAt: typeof d.createdAt === 'number' ? d.createdAt : now,
       updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : now,
       sourceText: d.sourceText,
-      entities: sanitizeEntities(d.entities),
+      entities: sanitizeEntities(d.entities, d.sourceText.length),
     }
   })
 }

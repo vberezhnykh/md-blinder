@@ -20,8 +20,15 @@ interface Line {
   yTop: number // максимальный y
 }
 
-const PAGE_NUMBER_RE = /^[\s\-–—]*\d+[\s\-–—]*$/
-const PAGE_WORD_RE = /^page\s+\d+/i
+export interface PdfPageLayout {
+  bottom: number
+  height: number
+  pageNumber: number
+  totalPages: number
+}
+
+const PAGE_NUMBER_RE = /^[\s\-–—]*(\d{1,4})[\s\-–—]*$/
+const PAGE_WORD_RE = /^(?:page|страница|сторінка)\s+\d{1,4}(?:\s+(?:of|из|з)\s+\d{1,4})?$/i
 const NUMBERED_CLAUSE_RE = /^\d+(?:\.\d+)*\.?\)?\s+\S/
 const BULLET_RE = /^[•▪◦‣·]\s+/
 const DASH_BULLET_RE = /^[-–—]\s+\S/
@@ -161,33 +168,43 @@ function suppressRepeatedFirstLast<T>(pagesLines: T[][], getText: (item: T) => s
   }
 }
 
-// Всегда выбрасывает "голые" номера страниц, где бы они ни оказались.
-function stripPageNumberLines<T>(pagesLines: T[][], getText: (item: T) => string): void {
+// Without geometry, only an explicit page label at a page boundary is safe
+// to remove. A bare number can be an amount or a complete bank account.
+function stripExplicitPageLabels<T>(pagesLines: T[][], getText: (item: T) => string): void {
   for (const lines of pagesLines) {
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const t = getText(lines[i])
-      if (PAGE_NUMBER_RE.test(t) || PAGE_WORD_RE.test(t)) {
-        lines.splice(i, 1)
-      }
-    }
+    if (lines.length > 1 && PAGE_WORD_RE.test(getText(lines[lines.length - 1]))) lines.pop()
+    if (lines.length > 1 && PAGE_WORD_RE.test(getText(lines[0]))) lines.shift()
   }
 }
 
 // 3. Подавление повторяющихся колонтитулов и номеров страниц (текстовый PDF).
-function stripHeadersFooters(pagesLines: Line[][]): void {
-  if (pagesLines.length < 3) return
-  suppressRepeatedFirstLast(pagesLines, (l) => l.text)
-  stripPageNumberLines(pagesLines, (l) => l.text)
+function stripHeadersFooters(pagesLines: Line[][], layouts?: PdfPageLayout[]): void {
+  for (let pageIndex = 0; pageIndex < pagesLines.length; pageIndex++) {
+    const layout = layouts?.[pageIndex]
+    if (!layout) continue
+    const lines = pagesLines[pageIndex]
+    for (const index of [lines.length - 1, 0]) {
+      const line = lines[index]
+      if (!line || lines.length <= 1) continue
+      const match = PAGE_NUMBER_RE.exec(line.text)
+      const relativeY = (line.yTop - layout.bottom) / layout.height
+      if (match && (relativeY < 0.08 || relativeY > 0.92)
+        && Number(match[1]) === layout.pageNumber && Number(match[1]) <= layout.totalPages) {
+        lines.splice(index, 1)
+      }
+    }
+  }
+  if (pagesLines.length >= 3) suppressRepeatedFirstLast(pagesLines, (l) => l.text)
+  stripExplicitPageLabels(pagesLines, (l) => l.text)
 }
 
 // Публичный чистый эквивалент для построчного текста (используется OCR-
-// конвейером в ocrPdf.ts, где нет внутреннего типа Line). Та же логика:
-// голые номера страниц выбрасываются всегда, подавление повторяющихся
-// первой/последней строки — только когда страниц >= 3.
+// конвейером в ocrPdf.ts, где нет координат строк). Числовые строки всегда
+// сохраняются: без геометрии нельзя отличить сумму от номера страницы.
 export function stripRepeatedLinesAndPageNumbers(pages: string[][]): string[][] {
   const working = pages.map((lines) => [...lines])
   if (working.length >= 3) suppressRepeatedFirstLast(working, (t) => t)
-  stripPageNumberLines(working, (t) => t)
+  stripExplicitPageLabels(working, (t) => t)
   return working
 }
 
@@ -294,12 +311,12 @@ function linesToBlocks(pagesLines: Line[][], bodySize: number): Block[] {
   return blocks
 }
 
-export function itemsToMarkdown(pages: PdfTextItem[][]): string {
+export function itemsToMarkdown(pages: PdfTextItem[][], layouts?: PdfPageLayout[]): string {
   const bodySize = detectBodySize(pages)
   if (bodySize === 0) return ''
 
   const pagesLines = pages.map((items) => buildLines(items, bodySize))
-  stripHeadersFooters(pagesLines)
+  stripHeadersFooters(pagesLines, layouts)
 
   const blocks = linesToBlocks(pagesLines, bodySize)
 

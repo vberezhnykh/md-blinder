@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { scoreDetections } from './scoring-core.mjs'
+import { scoreDetections, scoreOccurrenceCoverage } from './scoring-core.mjs'
 
 function statusOf(results, value) {
   return results.find((r) => r.gold.value === value)?.status
@@ -102,5 +102,78 @@ describe('scoreDetections', () => {
     const detected = [{ type: 'COMPANY', value: 'Уникальное Имя', positions: [] }]
     const { goldResults } = scoreDetections(gold, detected, '')
     expect(statusOf(goldResults, 'Уникальное Имя')).toBe('TYPE_MISMATCH')
+  })
+})
+
+describe('strict source occurrence coverage', () => {
+  const active = (positions, overrides = {}) => ({ type: 'PERSON', value: 'unrelated canonical spelling', anonymize: true, dismissed: false, positions, ...overrides })
+
+  it('finds a repeated leak even when legacy entity scoring reports a full HIT', () => {
+    const source = 'Acme approved. Acme signed.'
+    const gold = [{ type: 'COMPANY', value: 'Acme' }]
+    const detected = [active([{ start: 0, end: 4 }], { type: 'COMPANY', value: 'Acme' })]
+    expect(scoreDetections(gold, detected, source).goldResults[0].status).toBe('HIT')
+    const result = scoreOccurrenceCoverage(gold, detected, source, '[COMPANY_1] approved. Acme signed.')
+    expect(result.occurrences.map((occurrence) => occurrence.status)).toEqual(['FULL', 'MISSED'])
+    expect(result.summary).toEqual({ total: 2, full: 1, partial: 0, missed: 1, unanchored: 0, recall: 0.5 })
+    expect(result.residual).toHaveLength(1)
+  })
+
+  it('distinguishes partial, missed, unanchored and unavailable data', () => {
+    const gold = [{ value: 'Alice Smith' }, { value: 'Bob' }, { value: 'Absent Person' }]
+    const result = scoreOccurrenceCoverage(gold, [active([{ start: 0, end: 5 }])], 'Alice Smith and Bob')
+    expect(result.summary).toEqual({ total: 2, full: 0, partial: 1, missed: 1, unanchored: 1, recall: 0 })
+    expect(result.unanchored[0].gold.value).toBe('Absent Person')
+    const legacy = scoreOccurrenceCoverage(gold, [{ positions: [{ start: 0, end: 11 }] }], 'Alice Smith')
+    expect(legacy.available).toBe(false)
+    expect(legacy.summary.recall).toBeNull()
+    expect(legacy.missingActiveFlags).toBe(1)
+    expect(scoreOccurrenceCoverage(gold, [], null).summary.recall).toBeNull()
+  })
+
+  it('anchors every alias/variant with Unicode boundaries and normalized whitespace', () => {
+    const source = 'Анна Смирнова; АННА\n  СМИРНОВА; Смирновой; Ann; Anna'
+    const gold = [{ value: 'Анна Смирнова', aliases: ['Смирновой'], variants: ['Анна Смирнова'] }, { value: 'Ann' }]
+    const result = scoreOccurrenceCoverage(gold, [], source)
+    expect(result.occurrences.map((occurrence) => occurrence.value)).toEqual(['Анна Смирнова', 'АННА\n  СМИРНОВА', 'Смирновой', 'Ann'])
+    expect(result.summary.total).toBe(4)
+  })
+
+  it('deduplicates nested aliases and duplicate gold rows at the same source span', () => {
+    const gold = [{ value: 'Alice Smith', aliases: ['Alice', 'Smith', 'ALICE SMITH'] }, { value: 'Alice Smith' }]
+    const result = scoreOccurrenceCoverage(gold, [active([{ start: 0, end: 5 }])], 'Alice Smith')
+    expect(result.occurrences).toHaveLength(1)
+    expect(result.occurrences[0]).toMatchObject({ start: 0, end: 11, status: 'PARTIAL', goldIndices: [0, 1] })
+  })
+
+  it('does not collapse distinct repeated mentions into one through a crossing alias', () => {
+    const result = scoreOccurrenceCoverage([{ value: 'New York', aliases: ['York New'] }], [], 'New York New York')
+    expect(result.occurrences.map(({ start, end }) => [start, end])).toEqual([[0, 8], [4, 12], [9, 17]])
+    expect(result.summary.total).toBe(3)
+  })
+
+  it('unions adjacent/overlapping active ranges but never bridges an uncovered gap', () => {
+    const gold = [{ value: 'Alice Smith' }]
+    const covered = scoreOccurrenceCoverage(gold, [active([{ start: 0, end: 5 }]), active([{ start: 5, end: 11 }])], 'Alice Smith')
+    expect(covered.summary.full).toBe(1)
+    const gap = scoreOccurrenceCoverage(gold, [active([{ start: 0, end: 5 }, { start: 6, end: 11 }])], 'Alice Smith')
+    expect(gap.occurrences[0]).toMatchObject({ status: 'PARTIAL', coveredChars: 10 })
+  })
+
+  it('uses activation/dismissal rather than candidate/type labels or canonical value as proof of protection', () => {
+    const gold = [{ type: 'PERSON', value: 'Alice' }]
+    const position = [{ start: 0, end: 5 }]
+    expect(scoreOccurrenceCoverage(gold, [active(position, { anonymize: false })], 'Alice').summary.missed).toBe(1)
+    expect(scoreOccurrenceCoverage(gold, [active(position, { dismissed: true })], 'Alice').summary.missed).toBe(1)
+    expect(scoreOccurrenceCoverage(gold, [active(position, { type: 'OTHER', candidate: true })], 'Alice').summary.full).toBe(1)
+    expect(scoreOccurrenceCoverage(gold, [active([], { value: 'Alice' })], 'Alice').summary.missed).toBe(1)
+  })
+
+  it('rejects invalid offsets and keeps occurrence recall unavailable when no source anchor exists', () => {
+    const gold = [{ value: 'Alice' }]
+    const result = scoreOccurrenceCoverage(gold, [active([{ start: -1, end: 5 }, { start: 0, end: 999 }, { start: 0.5, end: 5 }])], 'Alice')
+    expect(result.summary.missed).toBe(1)
+    expect(result.invalidPositions).toBe(3)
+    expect(scoreOccurrenceCoverage(gold, [], '').summary).toMatchObject({ total: 0, unanchored: 1, recall: null })
   })
 })

@@ -1,4 +1,5 @@
 import type { RawMatch } from './types'
+import { findImageExclusionRanges, maskImagesForDetection } from './imageSafety'
 
 export const ISO_COUNTRY_CODES = new Set([
   'AD', 'AE', 'AF', 'AG', 'AI', 'AL', 'AM', 'AO', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AW', 'AX', 'AZ',
@@ -56,24 +57,65 @@ function luhnCheck(digits: string): boolean {
   return sum % 10 === 0
 }
 
-function detectEmail(text: string): RawMatch[] {
-  const re = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+export function detectEmail(text: string): RawMatch[] {
   const matches: RawMatch[] = []
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text))) {
-    matches.push({ type: 'EMAIL', value: m[0], start: m.index, end: m.index + m[0].length })
+  // Scan around @ instead of retrying an unbounded prefix at every character.
+  // Each run is visited at most twice, including malformed strings with many @s.
+  for (let at = text.indexOf('@'); at >= 0; at = text.indexOf('@', at + 1)) {
+    let start = at
+    while (start > 0 && /[a-zA-Z0-9._%+'-]/.test(text[start - 1])) start--
+    if (start === at) continue
+    let end = at + 1
+    while (end < text.length && /[a-zA-Z0-9.-]/.test(text[end])) end++
+    while (text[end - 1] === '.') end--
+    const domain = text.slice(at + 1, end)
+    const dot = domain.lastIndexOf('.')
+    if (dot <= 0 || !/^[a-zA-Z]{2,}$/.test(domain.slice(dot + 1))) continue
+    matches.push({ type: 'EMAIL', value: text.slice(start, end), start, end })
   }
   return matches
 }
 
+// The common document jurisdictions have fixed lengths. Unknown jurisdictions
+// retain the generic checksum-based fallback, with no truncation inside a token.
+const IBAN_LENGTHS: Readonly<Record<string, number>> = {
+  AD: 24, AE: 23, AL: 28, AT: 20, AZ: 28, BA: 20, BE: 16, BG: 22, BH: 22,
+  BR: 29, BY: 28, CH: 21, CR: 22, CY: 28, CZ: 24, DE: 22, DK: 18, DO: 28,
+  EE: 20, EG: 29, ES: 24, FI: 18, FO: 18, FR: 27, GB: 22, GE: 22, GI: 23,
+  GL: 18, GR: 27, GT: 28, HR: 21, HU: 28, IE: 22, IL: 23, IS: 26, IT: 27,
+  JO: 30, KZ: 20, KW: 30, LB: 28, LC: 32, LI: 21, LT: 20, LU: 20, LV: 21,
+  MC: 27, MD: 24, ME: 22, MK: 19, MR: 27, MT: 31, MU: 30, NL: 18, NO: 15,
+  PK: 24, PL: 28, PS: 29, PT: 25, QA: 29, RO: 24, RS: 22, SA: 24, SC: 31,
+  SE: 24, SI: 19, SK: 24, SM: 27, ST: 25, SV: 28, TL: 23, TN: 24, TR: 26,
+  UA: 29, VA: 22, VG: 24, XK: 20,
+}
+
 function detectIban(text: string): RawMatch[] {
-  // Matches only upper-case IBANs ([A-Z]{2}\d{2}…); lower-case IBANs are not detected.
-  const re = /\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b/g
+  const re = /(?<![\p{L}\p{N}])[A-Z]{2}\d{2}/giu
   const matches: RawMatch[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    if (isValidIban(m[0])) {
-      matches.push({ type: 'IBAN', value: m[0], start: m.index, end: m.index + m[0].length })
+    const country = m[0].slice(0, 2).toUpperCase()
+    if (!ISO_COUNTRY_CODES.has(country)) continue
+    const length = IBAN_LENGTHS[country]
+    let normalized = m[0].toUpperCase()
+    let acceptedEnd = -1
+    let cursor = re.lastIndex
+    while (cursor < text.length && normalized.length < (length ?? 34)) {
+      const ch = text[cursor]
+      if (/[ \t\u00a0\u202f]/.test(ch)) { cursor++; continue }
+      if (!/[a-zA-Z0-9]/.test(ch)) break
+      normalized += ch.toUpperCase()
+      cursor++
+      if (normalized.length < 15 || (length && normalized.length !== length)) continue
+      // Do not accept a checksum-valid prefix of a longer compact/grouped number.
+      if (/[\p{L}\p{N}]/u.test(text[cursor] ?? '')) continue
+      if (/^[ \t\u00a0\u202f]+\d/.test(text.slice(cursor, cursor + 16))) continue
+      if (isValidIban(normalized)) acceptedEnd = cursor
+    }
+    if (acceptedEnd >= 0) {
+      matches.push({ type: 'IBAN', value: text.slice(m.index, acceptedEnd), start: m.index, end: acceptedEnd })
+      re.lastIndex = acceptedEnd
     }
   }
   return matches
@@ -145,14 +187,15 @@ function isSnilsLike(s: string): boolean {
   return /^\d{3}-\d{3}-\d{3}[\s-]\d{2}$/.test(s.trim())
 }
 
-const PHONE_LABEL_SRC = 'tel|telephone|phone|mobile|cell|fax'
+const PHONE_LABEL_SRC = 'telephone|phone|mobile|cell|fax|телефон|телефону|мобільний|мобильный|моб|факс|тел|tel'
+const PHONE_LABEL = `(?<![\\p{L}\\p{N}])(?:${PHONE_LABEL_SRC})(?![\\p{L}\\p{N}])`
 
 // Метка телефона непосредственно перед кандидатом (в пределах ~10 символов слева) —
 // защищает 3-значную группировку ("Tel: 123 456 789") и разрешает контактную метку
 // перед контактным номером без разделителей ("Tel: 0612345678").
 function hasPhoneLabelBefore(text: string, index: number): boolean {
   const before = text.slice(Math.max(0, index - 25), index)
-  return new RegExp(`\\b(?:${PHONE_LABEL_SRC})\\b[\\s.:#]*$`, 'i').test(before)
+  return new RegExp(`${PHONE_LABEL}[\\s.:№#]*$`, 'iu').test(before)
 }
 
 // Денежная сумма без метки телефона: заканчивается на копейки/центы, ИЛИ похожа на
@@ -198,7 +241,7 @@ function detectPhone(text: string): RawMatch[] {
 
   // Проход 2: метка телефона + контактные цифры без разделителей ("Tel: 0612345678",
   // "Phone #: 12025550123"). Без метки голое число НЕ считается телефоном.
-  const labelRe = new RegExp(`\\b(?:${PHONE_LABEL_SRC})\\b[\\s.:#]*(\\+?\\d{7,15})`, 'gi')
+  const labelRe = new RegExp(`${PHONE_LABEL}[\\s.:№#]*(\\+?\\d{7,15})(?![\\p{L}\\p{N}])`, 'giu')
   let lm: RegExpExecArray | null
   while ((lm = labelRe.exec(text))) {
     const captured = lm[1]
@@ -211,17 +254,45 @@ function detectPhone(text: string): RawMatch[] {
     matches.push({ type: 'PHONE', value: captured, start: groupStart, end: groupEnd })
   }
 
+  // An explicit international + is sufficient context even without a label.
+  const international = /(?<![\p{L}\p{N}+])\+[1-9]\d{6,14}(?![\p{L}\p{N}])/gu
+  while ((m = international.exec(text))) {
+    const start = m.index
+    const end = start + m[0].length
+    if (!matches.some((p) => start < p.end && p.start < end)) {
+      matches.push({ type: 'PHONE', value: m[0], start, end })
+    }
+  }
+
   return matches
 }
 
 function detectAccount(text: string): RawMatch[] {
-  const re = /\b(?:account|acct|a\/c|iban)\s*(?:no\.?|number|#)?\s*[:.-]?\s*([A-Z0-9][A-Z0-9 -]{5,30}\d)/gi
+  const re = /\b(?:account|acct|a\/c|iban)\s*(?:no\.?|number|#)?\s*[:.-]?\s*/gi
   const matches: RawMatch[] = []
-  let m: RegExpExecArray | null
-  while ((m = re.exec(text))) {
-    const group = m[1]
-    const groupStart = m.index + m[0].indexOf(group)
-    matches.push({ type: 'ACCOUNT', value: group, start: groupStart, end: groupStart + group.length })
+  while (re.exec(text)) {
+    const groupStart = re.lastIndex
+    const tokenRe = /[A-Z0-9]+/giy
+    tokenRe.lastIndex = groupStart
+    const first = tokenRe.exec(text)
+    if (!first || !/\d/.test(first[0])) continue
+    let end = tokenRe.lastIndex
+    let count = first[0].length
+    for (;;) {
+      let next = end
+      while (/[ \t\u00a0\u202f-]/.test(text[next] ?? '')) next++
+      if (next === end) break
+      tokenRe.lastIndex = next
+      const token = tokenRe.exec(text)
+      if (!token || !/\d/.test(token[0])) break
+      end = tokenRe.lastIndex
+      count += token[0].length
+    }
+    // Length means significant characters, not spaces, and overflow rejects the
+    // complete candidate instead of redacting only a seemingly valid prefix.
+    if (count < 7 || count > 34) continue
+    matches.push({ type: 'ACCOUNT', value: text.slice(groupStart, end), start: groupStart, end })
+    re.lastIndex = end
   }
   return matches
 }
@@ -870,9 +941,12 @@ function detectWebsite(text: string): RawMatch[] {
 }
 
 export function detectStructural(text: string): RawMatch[] {
-  return [
+  const images = findImageExclusionRanges(text)
+  text = maskImagesForDetection(text, images)
+  const ibans = detectIban(text)
+  const matches = [
     ...detectEmail(text),
-    ...detectIban(text),
+    ...ibans,
     ...detectRussianIds(text),
     ...detectRussianAccounts(text),
     ...detectUkrainianIds(text),
@@ -888,4 +962,8 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectRussianAddress(text),
     ...detectUsAddress(text),
   ]
+  return matches.filter((m) =>
+    !images.some((image) => m.start < image.end && image.start < m.end) &&
+    (m.type === 'IBAN' || !ibans.some((iban) => m.start < iban.end && iban.start < m.end)),
+  )
 }

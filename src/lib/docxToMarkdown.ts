@@ -4,23 +4,37 @@ type WorkerResult =
   | { ok: true; html: string }
   | { ok: false; error: string }
 
-export async function docxToMarkdown(arrayBuffer: ArrayBuffer): Promise<string> {
+export async function docxToMarkdown(
+  arrayBuffer: ArrayBuffer,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> {
+  const { signal } = options
+  signal?.throwIfAborted()
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('../workers/docx.worker.ts', import.meta.url), {
       type: 'module',
     })
 
     const cleanup = () => {
+      signal?.removeEventListener('abort', onAbort)
+      worker.onmessage = null
+      worker.onerror = null
       worker.terminate()
     }
+    const onAbort = () => {
+      cleanup()
+      reject(signal?.reason ?? new DOMException('Обработка отменена', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     worker.onmessage = (e: MessageEvent<WorkerResult>) => {
       cleanup()
-      const data = e.data
-      if (data.ok) {
-        resolve(htmlToMarkdown(data.html))
-      } else {
-        reject(new Error(data.error))
+      try {
+        const data = e.data
+        if (data.ok) resolve(htmlToMarkdown(data.html))
+        else reject(new Error(data.error))
+      } catch (error) {
+        reject(error)
       }
     }
 
@@ -29,6 +43,11 @@ export async function docxToMarkdown(arrayBuffer: ArrayBuffer): Promise<string> 
       reject(new Error(e.message || 'Не удалось обработать .docx в фоновом потоке'))
     }
 
-    worker.postMessage({ arrayBuffer }, [arrayBuffer])
+    try {
+      worker.postMessage({ arrayBuffer }, [arrayBuffer])
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
   })
 }

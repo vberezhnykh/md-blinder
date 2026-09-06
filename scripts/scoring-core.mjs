@@ -240,3 +240,116 @@ export function scoreDetections(goldEntities, detected, sourceText) {
 
   return { goldResults, extras }
 }
+
+function goldSpellings(gold) {
+  return [gold.value, ...(Array.isArray(gold.variants) ? gold.variants : []), ...(Array.isArray(gold.aliases) ? gold.aliases : [])]
+    .filter((value) => typeof value === 'string' && /[\p{L}\p{N}]/u.test(value))
+}
+
+// Deliberately literal: aliases/morphological variants must be in the gold set.
+// Do not infer a surname from a full name or count Ann inside Anna as an anchor.
+function allAnchors(sourceText, spellings) {
+  const spans = []
+  for (const spelling of new Set(spellings)) {
+    const raw = spelling.trim()
+    const pattern = raw.split(/\s+/).map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')
+    const left = /^[\p{L}\p{N}]/u.test(raw) ? '(?<![\\p{L}\\p{N}])' : ''
+    const right = /[\p{L}\p{N}]$/u.test(raw) ? '(?![\\p{L}\\p{N}])' : ''
+    const re = new RegExp(`${left}${pattern}${right}`, 'giu')
+    for (const match of sourceText.matchAll(re)) spans.push({ start: match.index, end: match.index + match[0].length })
+  }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end)
+  const unique = []
+  let longestEnd = -1
+  for (const span of spans) {
+    // A contained short alias describes the same occurrence as a longer name.
+    // Crossing matches remain separate: merging a chain of them could collapse
+    // several repeated full names into one occurrence and distort the denominator.
+    if (span.end <= longestEnd) continue
+    unique.push({ ...span })
+    longestEnd = span.end
+  }
+  return unique
+}
+
+function collectGoldOccurrences(goldEntities, sourceText) {
+  const bySpan = new Map()
+  const unanchored = []
+  goldEntities.forEach((gold, goldIndex) => {
+    const spans = allAnchors(sourceText, goldSpellings(gold))
+    if (!spans.length) unanchored.push({ goldIndex, gold })
+    for (const span of spans) {
+      const key = `${span.start}:${span.end}`
+      const previous = bySpan.get(key)
+      if (previous) previous.goldIndices.push(goldIndex)
+      else bySpan.set(key, { ...span, value: sourceText.slice(span.start, span.end), goldIndices: [goldIndex] })
+    }
+  })
+  return { occurrences: [...bySpan.values()].sort((a, b) => a.start - b.start || b.end - a.end), unanchored }
+}
+
+/**
+ * Strict occurrence recall, independent of legacy entity matching/type accuracy.
+ * Every source occurrence of a gold value/variant/alias must be fully covered by
+ * the union of valid active anonymize===true && !dismissed ranges. No fuzzy match,
+ * first-occurrence shortcut, or value-only detection can earn coverage.
+ *
+ * Unanchored gold entities are reported separately, never silently treated as
+ * covered or as one inferred occurrence. Missing activation flags in old capture
+ * files make recall unavailable. Residual literal matches in an optional preview
+ * are a separate check; their absence is not proof of complete anonymization.
+ */
+export function scoreOccurrenceCoverage(goldEntities, detected, sourceText, anonymizedText) {
+  const sourceAvailable = typeof sourceText === 'string'
+  const text = sourceAvailable ? sourceText : ''
+  const { occurrences, unanchored } = collectGoldOccurrences(goldEntities, text)
+  const missingActiveFlags = detected.filter((entity) => typeof entity.anonymize !== 'boolean').length
+  let invalidPositions = 0
+  const active = []
+  for (const entity of detected) {
+    if (entity.anonymize !== true || entity.dismissed) continue
+    for (const position of Array.isArray(entity.positions) ? entity.positions : []) {
+      if (!position || !Number.isInteger(position.start) || !Number.isInteger(position.end) ||
+          position.start < 0 || position.end <= position.start || position.end > text.length) {
+        invalidPositions++
+        continue
+      }
+      active.push({ start: position.start, end: position.end })
+    }
+  }
+  active.sort((a, b) => a.start - b.start || b.end - a.end)
+  const covered = []
+  for (const position of active) {
+    const previous = covered.at(-1)
+    if (previous && position.start <= previous.end) previous.end = Math.max(previous.end, position.end)
+    else covered.push({ ...position })
+  }
+
+  let firstCover = 0
+  const results = occurrences.map((occurrence) => {
+    while (firstCover < covered.length && covered[firstCover].end <= occurrence.start) firstCover++
+    let coveredChars = 0
+    for (let index = firstCover; index < covered.length && covered[index].start < occurrence.end; index++) {
+      coveredChars += Math.max(0, Math.min(occurrence.end, covered[index].end) - Math.max(occurrence.start, covered[index].start))
+    }
+    const status = coveredChars === occurrence.end - occurrence.start ? 'FULL' : coveredChars > 0 ? 'PARTIAL' : 'MISSED'
+    return { ...occurrence, status, coveredChars }
+  })
+  const full = results.filter((occurrence) => occurrence.status === 'FULL').length
+  const partial = results.filter((occurrence) => occurrence.status === 'PARTIAL').length
+  const missed = results.length - full - partial
+  const available = sourceAvailable && missingActiveFlags === 0
+  return {
+    available,
+    sourceAvailable,
+    missingActiveFlags,
+    invalidPositions,
+    occurrences: results,
+    unanchored,
+    summary: { total: results.length, full, partial, missed, unanchored: unanchored.length,
+      recall: available && results.length ? full / results.length : null },
+    residual: typeof anonymizedText === 'string'
+      ? collectGoldOccurrences(goldEntities, anonymizedText).occurrences
+      : null,
+  }
+}

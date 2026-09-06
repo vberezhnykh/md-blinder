@@ -1,10 +1,12 @@
-import { detectStructural } from './regexDetectors'
+import { detectStructuralAsync } from './structuralClient'
 import { detectEntitiesNer } from './ner'
 import { buildAnonymizedText } from './apply'
 import { stitchAddressRuns } from './stitchAddress'
 import { filterGenericNerMatches } from './nerFilter'
 import { NER_CONFIRM_THRESHOLD, NER_GRAY_ZONE_LOW } from './config'
 import type { AnonymizationResult, Entity, EntityType, RawMatch } from './types'
+import { normalizeValue } from './normalizeValue'
+export { normalizeValue } from './normalizeValue'
 
 export interface AnonymizeProgress {
   stage: 'regex' | 'ner-download' | 'ner-init' | 'ner-warmup' | 'ner-detect'
@@ -17,38 +19,6 @@ export interface AnonymizeProgress {
   batches?: number
   batchChunks?: number
   elapsedMs?: number
-}
-
-export function normalizeValue(type: EntityType, value: string): string {
-  const trimmed = value.trim().replace(/\s+/g, ' ')
-  if (type === 'CARD' || type === 'IBAN' || type === 'ACCOUNT') {
-    return trimmed.replace(/[\s-]/g, '').toUpperCase()
-  }
-  if (type === 'PERSON' || type === 'COMPANY' || type === 'ADDRESS' || type === 'EMAIL') {
-    return trimmed.toLowerCase()
-  }
-  if (type === 'PHONE') {
-    return trimmed.replace(/[\s\-().]/g, '')
-  }
-  if (type === 'REG_NUMBER' || type === 'SWIFT') {
-    return trimmed.replace(/[\s-]/g, '').toUpperCase()
-  }
-  // Номер документа пишут и «4506 123456», и «45 06 123456», и «4506123456» —
-  // это одна и та же сущность, поэтому пробелы и дефисы снимаем. Регистр вверх
-  // ради серий с буквами (UA «АВ 123456», загранпаспорта, права).
-  if (type === 'ID_DOC') {
-    return trimmed.replace(/[\s-]/g, '').toUpperCase()
-  }
-  // Сайт: схема, www и хвостовой слэш — вариации записи одного адреса, а не
-  // разные сущности («https://Example.com/» ≡ «www.example.com» ≡ «example.com»).
-  if (type === 'URL') {
-    return trimmed
-      .toLowerCase()
-      .replace(/^[a-z]+:\/\//, '')
-      .replace(/^www\./, '')
-      .replace(/\/+$/, '')
-  }
-  return trimmed
 }
 
 function overlaps(a: RawMatch, b: RawMatch): boolean {
@@ -78,37 +48,44 @@ function maxDefinedScore(a: number | undefined, b: number | undefined): number |
 // against NER matches; within each pass, earlier/longer spans win.
 function resolveOverlaps(structural: RawMatch[], ner: RawMatch[]): RawMatch[] {
   const accepted: RawMatch[] = []
-
-  const tryAccept = (m: RawMatch) => {
-    for (const acc of accepted) {
-      if (overlaps(m, acc)) return
-    }
-    accepted.push(m)
+  for (const m of [...structural].sort(byStartThenLonger)) {
+    const previous = accepted[accepted.length - 1]
+    if (!previous || !overlaps(m, previous)) accepted.push(m)
   }
-
-  for (const m of [...structural].sort(byStartThenLonger)) tryAccept(m)
-  for (const m of [...ner].sort(byStartThenLonger)) tryAccept(m)
-
-  return accepted.sort((a, b) => a.start - b.start)
+  const acceptedNer: RawMatch[] = []
+  let structuralIndex = 0
+  for (const m of [...ner].sort(byStartThenLonger)) {
+    while (structuralIndex < accepted.length && accepted[structuralIndex].end <= m.start) structuralIndex++
+    if (structuralIndex < accepted.length && overlaps(m, accepted[structuralIndex])) continue
+    const previous = acceptedNer[acceptedNer.length - 1]
+    if (!previous || !overlaps(m, previous)) acceptedNer.push(m)
+  }
+  return [...accepted, ...acceptedNer].sort((a, b) => a.start - b.start)
 }
 
 export async function anonymizeMarkdown(
   markdown: string,
   onProgress?: (p: AnonymizeProgress) => void,
+  signal?: AbortSignal,
 ): Promise<{ result: AnonymizationResult; nerFailed: boolean }> {
+  signal?.throwIfAborted()
   onProgress?.({ stage: 'regex' })
-  const structural = detectStructural(markdown)
+  const structural = await detectStructuralAsync(markdown, signal)
 
   let ner: RawMatch[] = []
   let nerFailed = false
   try {
     ner = await detectEntitiesNer(markdown, (p) =>
       onProgress?.({ ...p, stage: `ner-${p.stage}` as AnonymizeProgress['stage'] }),
+      signal,
     )
-  } catch {
+  } catch (error) {
+    signal?.throwIfAborted()
+    if (error instanceof Error && error.name === 'AbortError') throw error
     nerFailed = true
     ner = []
   }
+  signal?.throwIfAborted()
 
   const filteredNer = filterGenericNerMatches(ner)
   const stitchedNer = stitchAddressRuns(filteredNer, markdown)

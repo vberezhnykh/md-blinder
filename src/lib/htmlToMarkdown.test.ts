@@ -39,6 +39,27 @@ describe('htmlToMarkdown', () => {
     expect(md).toContain('A<br>B')
   })
 
+  it('preserves ordered cell content including paragraphs, lists, images and literal sentinels', () => {
+    const md = htmlToMarkdown(`<p>Literal {{BR}} outside</p><table><tr><td>Details</td></tr><tr><td>
+      <p>Obligations: {{BR}}</p><ul><li>Pay 1000 EUR</li><li>Contact Alice Smith</li></ul>
+      <p>After list<br>Second line</p><img src="data:image/png;base64,c3ludGhldGlj" alt="Signature">
+    </td></tr></table>`)
+    expect(md).toContain('Literal {{BR}} outside')
+    expect(md).toContain('Obligations: {{BR}}')
+    expect(md).toContain('Pay 1000 EUR')
+    expect(md).toContain('Contact Alice Smith')
+    expect(md).toContain('After list<br>Second line')
+    expect(md).toContain('![Signature](data:image/png;base64,c3ludGhldGlj)')
+    const content = md.split('\n').find((line) => line.includes('Obligations:'))!
+    expect(content.indexOf('Obligations:')).toBeLessThan(content.indexOf('Pay 1000 EUR'))
+    expect(content.indexOf('Contact Alice Smith')).toBeLessThan(content.indexOf('After list'))
+    expect(content).toContain('![Signature]')
+  })
+
+  it('escapes pipes inside a cell so they do not add extra columns', () => {
+    expect(htmlToMarkdown('<table><tr><td><p>A | B</p></td></tr></table>')).toContain('A \\| B')
+  })
+
   it('still converts a table that already has a <thead>', () => {
     const html = `
       <table>

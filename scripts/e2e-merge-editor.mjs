@@ -23,7 +23,14 @@ try {
       { id: 's', type: 'COMPANY', value: 'Tripath', placeholder: '[COMPANY_2]', positions: [{ start: p1, end: p1 + 7 }, { start: p2, end: p2 + 7 }], anonymize: true, manual: false },
     ] }
     const r = indexedDB.open('md-blinder'); r.onerror = () => rej(r.error)
-    r.onsuccess = () => { const tx = r.result.transaction('documents','readwrite'); tx.objectStore('documents').put(doc); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error) }
+    r.onsuccess = () => {
+      const db = r.result
+      const tx = db.transaction(['documents', 'documentMeta'], 'readwrite')
+      tx.objectStore('documents').put(doc)
+      tx.objectStore('documentMeta').put({ id: doc.id, name: doc.name, format: doc.format, createdAt: doc.createdAt, updatedAt: doc.updatedAt, entityCount: doc.entities.length })
+      tx.oncomplete = () => { db.close(); res() }
+      tx.onabort = tx.onerror = () => { db.close(); rej(tx.error) }
+    }
   }), docName)
 
   await page.reload({ waitUntil: 'domcontentloaded' })

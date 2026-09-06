@@ -1,4 +1,6 @@
-import { Gliner } from 'gliner'
+import { Gliner } from './glinerRuntime'
+import { loadModelBytes } from './modelAssets'
+import { assertCalibration, CALIBRATION_TEXT, CALIBRATION_LABELS } from './nerCalibration'
 import type { EntityType, RawMatch } from '../lib/anonymize/types'
 import { chunkText } from './chunkText'
 import { planBatches, expandBatchResult, countWords } from './nerBatching'
@@ -12,9 +14,6 @@ import type { NerProgress } from './nerProgress'
 // nothing cleared the confirm threshold. fp16 runs natively on WebGPU (fast) and
 // on wasm/CPU (correct but slow, ~minutes/doc — the CPU fallback trade-off).
 // ~580MB download vs the old English-only gliner_small (~306MB fp16).
-const MODEL_URL_FP16 =
-  'https://huggingface.co/onnx-community/gliner_multi-v2.1/resolve/main/onnx/model_fp16.onnx'
-const CACHE_NAME = 'md-blinder-ner'
 // How many chunks to run through the model in one inference() call. Batching
 // amortizes per-call overhead; too large wastes compute on padding (chunks are
 // padded to the batch's longest) and memory. 8 measured ~10% faster than 1 on
@@ -41,66 +40,6 @@ function post(m: OutboundMessage) {
 const MB = 1024 * 1024
 function fmtMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
-}
-
-// Downloads the ONNX model with progress reporting, caching it in Cache
-// Storage so subsequent runs (and offline use) skip the network entirely.
-// Возвращает ещё и признак «взято из кеша»: чтение 580 МБ из Cache Storage —
-// это тоже секунды, и пользователю полезно видеть, что сети тут уже нет.
-async function loadModelBytes(
-  modelUrl: string,
-  onPct: (pct: number, cached: boolean) => void,
-): Promise<{ bytes: Uint8Array; cached: boolean }> {
-  let cache: Cache | null = null
-  try {
-    cache = await caches.open(CACHE_NAME)
-    const cached = await cache.match(modelUrl)
-    if (cached) {
-      const buf = await cached.arrayBuffer()
-      onPct(100, true)
-      return { bytes: new Uint8Array(buf), cached: true }
-    }
-  } catch {
-    cache = null
-  }
-
-  const res = await fetch(modelUrl)
-  if (!res.ok) throw new Error(`Не удалось загрузить модель NER: HTTP ${res.status}`)
-
-  const total = Number(res.headers.get('Content-Length') ?? 0)
-  let bytes: Uint8Array
-
-  if (res.body) {
-    const reader = res.body.getReader()
-    const chunks: Uint8Array[] = []
-    let received = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      chunks.push(value)
-      received += value.length
-      if (total > 0) onPct(Math.round((received / total) * 100), false)
-    }
-    bytes = new Uint8Array(received)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.length
-    }
-  } else {
-    bytes = new Uint8Array(await res.arrayBuffer())
-  }
-
-  if (cache) {
-    try {
-      await cache.put(modelUrl, new Response(bytes.slice()))
-    } catch {
-      // ignore cache write failures (e.g. storage quota) — detection still works
-    }
-  }
-
-  onPct(100, false)
-  return { bytes, cached: false }
 }
 
 let glinerPromise: Promise<Gliner> | null = null
@@ -132,41 +71,36 @@ function getGliner(requestId: string): Promise<Gliner> {
         (self as unknown as { navigator?: { gpu?: unknown } }).navigator,
       )
 
+      const t0 = performance.now()
+      const { bytes: modelBytes, cached } = await loadModelBytes((pct, fromCache) =>
+        post({ requestId, type: 'progress', stage: 'download', pct, cached: fromCache }),
+      )
+      const downloadMs = performance.now() - t0
+      console.log(`[ner] модель ${(modelBytes.length / MB).toFixed(0)} МБ ${cached ? 'из кеша' : 'скачана'} за ${fmtMs(downloadMs)}`)
+
       // fp16 on whichever EP we run (GPU or CPU), then builds + warms up GLiNER
       // so any runtime failure surfaces here (→ fallback).
       async function buildGliner(ep: ExecProvider): Promise<Gliner> {
-        const t0 = performance.now()
-        const { bytes: modelBytes, cached } = await loadModelBytes(MODEL_URL_FP16, (pct, fromCache) =>
-          post({ requestId, type: 'progress', stage: 'download', pct, cached: fromCache }),
-        )
-        const downloadMs = performance.now() - t0
-        console.log(
-          `[ner] модель ${(modelBytes.length / MB).toFixed(0)} МБ ${cached ? 'из кеша' : 'скачана'} за ${fmtMs(downloadMs)}`,
-        )
-
         // Создание ONNX-сессии — самая «тихая» фаза: onnxruntime парсит и
         // оптимизирует граф на 580 МБ (именно здесь сыпятся warning'и вида
         // «Failed to find kernel for ReduceMean» — это шум оптимизатора, не
         // ошибка), и на CPU это десятки секунд без единого события.
         post({ requestId, type: 'progress', stage: 'init', ep })
         const t1 = performance.now()
-        const gliner = new Gliner({
-          tokenizerPath: 'onnx-community/gliner_multi-v2.1',
-          onnxSettings: {
-            modelPath: modelBytes,
-            executionProvider: ep,
-            wasmPaths: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/',
-          },
-          transformersSettings: { allowLocalModels: false, useBrowserCache: true },
-        })
-        await gliner.initialize()
+        const gliner = await Gliner.create(modelBytes, ep)
         const initMs = performance.now() - t1
         console.log(`[ner] сессия ONNX (${ep}) создана за ${fmtMs(initMs)}`)
 
         // Force GPU kernel init and surface runtime errors immediately.
         post({ requestId, type: 'progress', stage: 'warmup', ep })
         const t2 = performance.now()
-        await gliner.inference({ texts: ['John Smith'], entities: ['person'], flatNer: true, threshold: 0.5 })
+        try {
+          const [calibration] = await gliner.inference({ texts: [CALIBRATION_TEXT], entities: CALIBRATION_LABELS, flatNer: true, threshold: 0.5 })
+          assertCalibration(calibration)
+        } catch (error) {
+          await gliner.release()
+          throw error
+        }
         const warmupMs = performance.now() - t2
         console.log(`[ner] прогрев (${ep}) за ${fmtMs(warmupMs)}`)
 
@@ -174,10 +108,8 @@ function getGliner(requestId: string): Promise<Gliner> {
         return gliner
       }
 
-      // Confirm a real GPU adapter is obtainable BEFORE downloading the big fp16
-      // model — navigator.gpu can exist while requestAdapter() yields null (no
-      // GPU / blocklisted / headless), and we must not waste a ~306MB download
-      // only to fall back to wasm anyway.
+      // Confirm the adapter before creating a GPU session. Both providers use
+      // the same fp16 buffer, including after a failed GPU initialization.
       if (preferred === 'webgpu' && (await webgpuHasAdapter())) {
         try {
           const g = await buildGliner('webgpu')
@@ -193,7 +125,10 @@ function getGliner(requestId: string): Promise<Gliner> {
       activeEp = 'wasm'
       console.log('[ner] execution provider: wasm (fp16)')
       return g
-    })()
+    })().catch((error: unknown) => {
+      glinerPromise = null
+      throw error
+    })
   }
   return glinerPromise
 }

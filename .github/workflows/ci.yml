@@ -4,32 +4,54 @@ on:
   push:
   pull_request:
 
-# The golden harness (scripts/e2e-detect.mjs + scripts/score.mjs) runs against the
-# confidential local corpus in test-samples/ and is deliberately NOT run in CI.
-# CI covers only lint + the synthetic unit tests on the clean core.
+permissions:
+  contents: read
+
+# Real documents and model-quality captures remain local and must never be
+# uploaded as CI fixtures/artifacts. Browser regressions use synthetic data and
+# a deterministic NER transport, with the real UI, structural worker and IDB.
 
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
         with:
-          node-version: 22
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
           cache: npm
 
-      # `npm install`, not `npm ci`: the lockfile is generated on Windows, and
-      # vite 8 / rolldown's platform-specific optional native bindings resolve
-      # their transitive deps (e.g. @emnapi/core) differently on Linux, so the
-      # strict `npm ci` sync check fails on the CI runner ("Missing … from lock
-      # file"). `npm install` reconciles those optional deps for the runner's
-      # platform without weakening the lint/test signal.
+      - name: Use the lockfile's npm version
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
+
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --include=optional --no-audit --no-fund
 
       - name: Lint
         run: npm run lint
 
       - name: Unit tests
         run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Check dependency advisories
+        if: runner.os == 'Linux'
+        run: npm audit --audit-level=high
+
+      - name: Install Chromium
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser regressions against production build
+        if: runner.os == 'Linux'
+        run: npm run test:e2e
