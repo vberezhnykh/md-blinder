@@ -1,18 +1,16 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { detectFileKind } from './lib/fileType'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
-import { runSecondPass } from './lib/anonymize/secondPass'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
 import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { findImageRanges } from './lib/anonymize/imageSafety'
-import { computeExportGate, type ExportGate } from './lib/anonymize/exportGate'
 import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
 import { copyText } from './lib/clipboard'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDocMeta } from './lib/history'
-import { useDocumentSession, type DocumentSnapshot } from './hooks/useDocumentSession'
+import { useDocumentSession } from './hooks/useDocumentSession'
 import { useAnalysisJob } from './hooks/useAnalysisJob'
 import { useHistoryStore } from './hooks/useHistoryStore'
 import ReplacementTable from './components/ReplacementTable'
@@ -30,12 +28,6 @@ function downloadBlob(blob: Blob, name: string) {
   a.download = name
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-
-interface CheckedExport extends ExportGate {
-  passAt: number
-  snapshot: DocumentSnapshot
-  nerFailed: boolean
 }
 
 type Progress = UiProgress
@@ -60,7 +52,7 @@ function toProgress(p: AnonymizeProgress): Progress {
 function App() {
   const historyStore = useHistoryStore()
   const { history, error: historyError, setError: setHistoryError, saving, queueSave, flush, refresh: refreshHistory } = historyStore
-  const { snapshot, snapshotRef, replace, edit, setEntities, isCurrent } = useDocumentSession(queueSave)
+  const { snapshot, snapshotRef, replace, edit, setEntities } = useDocumentSession(queueSave)
   const { start: startJob, cancel: cancelJob } = useAnalysisJob()
   const sourceText = snapshot.doc?.sourceText ?? ''
   const entities = snapshot.doc?.entities ?? EMPTY_ENTITIES
@@ -78,22 +70,16 @@ function App() {
   // процентов — тикающий таймер единственный признак, что ничего не зависло.
   const [elapsedSec, setElapsedSec] = useState(0)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
-  const [secondPassRunning, setSecondPassRunning] = useState(false)
-  const [secondPassInfo, setSecondPassInfo] = useState<string | null>(null)
-  const [lastSecondPassAt, setLastSecondPassAt] = useState<number | null>(null)
-  const [exportGate, setExportGate] = useState<CheckedExport | null>(null)
   const [forceOcr, setForceOcr] = useState(false)
-  const lastCheckedRevision = useRef(-1)
-  const [copyResult, setCopyResult] = useState<{ text: string; state: 'copied' | 'error' } | null>(null)
-  const gateDialogRef = useRef<HTMLDialogElement>(null)
+  // Результат последнего копирования/экспорта привязан к тексту, который ушёл
+  // наружу: любая правка сразу снимает «Скопировано ✓» и подсказку.
+  const [actionResult, setActionResult] = useState<{ text: string; state: 'copied' | 'copy-error' | 'exported' } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const cancelAnalysis = useCallback(() => {
     cancelJob()
-    setSecondPassRunning(false)
     setStatus('idle')
     setProgress(null)
-    setExportGate(null)
   }, [cancelJob])
 
   useEffect(() => {
@@ -107,7 +93,7 @@ function App() {
     () => buildAnonymizedText(sourceText, entities),
     [sourceText, entities],
   )
-  const copyState = copyResult?.text === anonymizedText ? copyResult.state : 'idle'
+  const actionState = actionResult?.text === anonymizedText ? actionResult.state : 'idle'
 
   const handleOpenDoc = useCallback(async (meta: HistoryDocMeta) => {
     cancelAnalysis()
@@ -126,8 +112,6 @@ function App() {
       setView('editor')
       setHasResult(true)
       setHistoryError('')
-      setSecondPassInfo(null)
-      setLastSecondPassAt(null)
     } catch (err) {
       if (job.isCurrent()) setHistoryError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -137,7 +121,7 @@ function App() {
 
   const handleDeleteDoc = useCallback(async (id: string) => {
     try {
-      // Stop a control pass before flushing; otherwise it can requeue this doc
+      // Stop a running analysis before flushing; otherwise it can requeue this doc
       // between the flush and deletion and resurrect it in the autosave timer.
       if (snapshotRef.current.doc?.id === id) cancelAnalysis()
       await flush()
@@ -174,8 +158,6 @@ function App() {
         cancelAnalysis()
         replace({ ...replacement, entities: dedupeEntityIds(replacement.entities) })
         setFileName(replacement.name)
-        setSecondPassInfo(null)
-        setLastSecondPassAt(null)
       }
       await refreshHistory()
       setHistoryError('')
@@ -195,8 +177,6 @@ function App() {
     setNerNotice(false)
     setView('editor')
     setHasResult(false)
-    setSecondPassInfo(null)
-    setLastSecondPassAt(null)
 
     try {
       await flush()
@@ -240,9 +220,12 @@ function App() {
       const { result, nerFailed } = await anonymizeMarkdown(md,
         (p) => { if (job.isCurrent()) setProgress(toProgress(p)) }, job.signal)
       if (!job.isCurrent()) return
+      // Родственные формы найденных сущностей (падежи фамилий, инициалы, название
+      // без ОПФ) ищутся правилами без NER, поэтому их можно предложить сразу.
+      const related = findRelatedOccurrences(md, result.entities)
       const now = Date.now()
       replace({ id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now,
-        updatedAt: now, sourceText: md, entities: result.entities }, true)
+        updatedAt: now, sourceText: md, entities: [...result.entities, ...related] }, true)
       setNerNotice(nerFailed)
       setView('editor')
       setStatus('idle')
@@ -274,101 +257,26 @@ function App() {
     if (file) void processFile(file)
   }
 
-  const runControlPass = useCallback(async (): Promise<CheckedExport | null> => {
-    const before = snapshotRef.current
-    if (!before.doc || secondPassRunning) return null
-    const job = startJob()
-    setSecondPassRunning(true)
-    setSecondPassInfo(null)
-    try {
-      const { entities: found, nerFailed } = await runSecondPass(before.doc.sourceText, before.doc.entities, (p) => {
-        if (job.isCurrent() && isCurrent(before)) setSecondPassInfo(
-          `Контрольная проверка — ${statusLabel({ ...p, phase: `ner-${p.stage}` } as UiProgress)}`)
-      }, job.signal,
-      )
-      if (!job.isCurrent()) return null
-      if (!isCurrent(before)) {
-        setSecondPassInfo('Документ изменён во время проверки. Запустите проверку или экспорт заново.')
-        return null
-      }
-      const combined = [...before.doc.entities, ...found]
-      const related = findRelatedOccurrences(before.doc.sourceText, combined)
-      const newCandidates = [...found, ...related]
-      if (newCandidates.length > 0) setEntities([...before.doc.entities, ...newCandidates])
-      const checked = snapshotRef.current
-      const gate = computeExportGate(checked.doc!.entities)
-      const passAt = Date.now()
-      lastCheckedRevision.current = checked.revision
-      setLastSecondPassAt(nerFailed ? null : passAt)
-      setSecondPassInfo(
-        nerFailed
-          ? 'Проверка неполная: NER недоступен. Выполнен только поиск по правилам. Повторите проверку перед экспортом.'
-          : newCandidates.length > 0
-          ? `Контрольный проход нашёл кандидатов: ${newCandidates.length}. Проверьте секцию «Проверьте вручную».`
-          : 'Контрольный проход не нашёл пропусков.',
-      )
-      return { ...gate, needsConfirm: gate.needsConfirm || nerFailed, passAt, snapshot: checked, nerFailed }
-    } catch {
-      if (job.isCurrent()) setSecondPassInfo('Не удалось выполнить контрольную проверку. Повторите попытку.')
-      return null
-    } finally {
-      if (job.isCurrent()) setSecondPassRunning(false)
-      job.finish()
-    }
-  }, [snapshotRef, secondPassRunning, startJob, isCurrent, setEntities])
-
-  const performMdExport = useCallback((checked: CheckedExport) => {
-    if (!isCurrent(checked.snapshot) || !checked.snapshot.doc) {
-      setExportGate(null)
-      setSecondPassInfo('Документ изменён после проверки. Запустите экспорт заново.')
-      return
-    }
-    const doc = checked.snapshot.doc
-    const text = buildAnonymizedText(doc.sourceText, doc.entities)
-    const base = doc.name.replace(/\.(docx?|pdf)$/i, '') || 'document'
-    downloadBlob(new Blob([text], { type: 'text/markdown;charset=utf-8' }), `${base}.md`)
-  }, [isCurrent])
-
-  // Копирование мгновенное: никакого контрольного прохода и подтверждений
-  // перед ним. Это осознанный размен — B5-гейт остаётся только на экспорте .md
-  // (файл уходит наружу и живёт дальше), а копирование в буфер задумано как
-  // быстрое действие «взял текст и вставил». Непросмотренные кандидаты после
-  // копирования показываются подсказкой, не блокируя.
+  // Копирование и экспорт мгновенные: текст берётся из текущей разметки без
+  // повторного прогона NER. Непросмотренные кандидаты не блокируют действие —
+  // о них сообщает подсказка после копирования или скачивания.
   const handleCopy = useCallback(async () => {
     const ok = await copyText(anonymizedText)
-    setCopyResult({ text: anonymizedText, state: ok ? 'copied' : 'error' })
+    setActionResult({ text: anonymizedText, state: ok ? 'copied' : 'copy-error' })
   }, [anonymizedText])
+
+  const handleExport = useCallback(() => {
+    const base = fileName.replace(/\.(docx?|pdf)$/i, '') || 'document'
+    downloadBlob(new Blob([anonymizedText], { type: 'text/markdown;charset=utf-8' }), `${base}.md`)
+    setActionResult({ text: anonymizedText, state: 'exported' })
+  }, [anonymizedText, fileName])
 
   // Status is derived from the copied text, so edits invalidate it immediately.
   useEffect(() => {
-    if (copyState === 'idle') return
-    const id = setTimeout(() => setCopyResult(null), 2500)
+    if (actionState === 'idle') return
+    const id = setTimeout(() => setActionResult(null), 2500)
     return () => clearTimeout(id)
-  }, [copyState])
-
-  // B5: перед экспортом всегда прогоняем контрольную проверку — если остались
-  // непросмотренные кандидаты «серой зоны», блокируем скачивание мягким подтверждением
-  const handleExport = async () => {
-    const checked = await runControlPass()
-    if (!checked) return
-    if (checked.needsConfirm) {
-      setExportGate(checked)
-      return
-    }
-    performMdExport(checked)
-  }
-
-  useEffect(() => {
-    if (lastCheckedRevision.current !== snapshot.revision) setLastSecondPassAt(null)
-  }, [snapshot.revision])
-
-  // B5: управляем нативным <dialog> как модалкой (backdrop + Esc) через showModal/close
-  useEffect(() => {
-    const d = gateDialogRef.current
-    if (!d) return
-    if (exportGate && !d.open) d.showModal()
-    if (!exportGate && d.open) d.close()
-  }, [exportGate])
+  }, [actionState])
 
   const handleExportCsv = () => {
     const csv = entitiesToCsv(entities, sourceText)
@@ -436,9 +344,7 @@ function App() {
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
   const activeCount = entities.filter((e) => e.anonymize).length
-  // Считается мгновенно (обычный фильтр по сущностям, без NER) — годится для
-  // подсказки сразу после копирования.
-  const unreviewedCount = computeExportGate(entities).unreviewed
+  const unreviewedCount = entities.filter((e) => e.candidate).length
   const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
   const imageCount = useMemo(() => findImageRanges(sourceText).length, [sourceText])
 
@@ -536,18 +442,13 @@ function App() {
       {hasResult && historyError && <p className="status error" role="alert">
         {historyError} <button type="button" onClick={() => { void flush().catch(() => {}) }}>Повторить сохранение</button>
       </p>}
-      {(isLoading || secondPassRunning) && <button type="button" onClick={() => {
-        cancelAnalysis()
-        setSecondPassInfo('Обработка отменена. Можно запустить её заново.')
-      }}>Отменить обработку</button>}
+      {isLoading && <button type="button" onClick={cancelAnalysis}>Отменить обработку</button>}
 
       {snapshot.doc && (
-        <section className="result" hidden={!hasResult} data-last-pass={lastSecondPassAt ?? undefined}>
+        <section className="result" hidden={!hasResult}>
           <div className="result-header">
             <h2>Результат</h2>
           </div>
-
-          {secondPassInfo && <p className="status-hint second-pass-info">{secondPassInfo}</p>}
 
           {nerNotice && (
             <p className="ner-notice">
@@ -587,10 +488,7 @@ function App() {
               </div>
             )}
             <div className="result-actions">
-              <button type="button" onClick={() => void runControlPass()} disabled={secondPassRunning || isLoading}>
-                {secondPassRunning ? 'Проверка…' : 'Контрольная проверка'}
-              </button>
-              <button type="button" onClick={() => void handleExport()} disabled={secondPassRunning}>
+              <button type="button" onClick={handleExport}>
                 Экспортировать .md
               </button>
               <button
@@ -599,9 +497,9 @@ function App() {
                 onClick={() => void handleCopy()}
                 aria-live="polite"
               >
-                {copyState === 'copied'
+                {actionState === 'copied'
                   ? 'Скопировано ✓'
-                  : copyState === 'error'
+                  : actionState === 'copy-error'
                     ? 'Не удалось скопировать'
                     : 'Копировать текст'}
               </button>
@@ -613,13 +511,11 @@ function App() {
             </div>
           </div>
 
-          {/* Копирование не блокируется контрольной проверкой, поэтому о
-              непросмотренных кандидатах сообщаем постфактум — подсказкой. */}
-          {copyState === 'copied' && unreviewedCount > 0 && (
+          {(actionState === 'copied' || actionState === 'exported') && unreviewedCount > 0 && (
             <p className="status-hint">
-              Текст скопирован. Непросмотренных кандидатов «серой зоны»: <b>{unreviewedCount}</b> —
-              они не заменены. Проверьте секцию «Проверьте вручную» или запустите контрольную
-              проверку.
+              {actionState === 'copied' ? 'Текст скопирован' : 'Файл сохранён'}. Непросмотренных
+              кандидатов «серой зоны»: <b>{unreviewedCount}</b> — они не заменены. Проверьте секцию
+              «Проверьте вручную».
             </p>
           )}
 
@@ -661,31 +557,6 @@ function App() {
         </section>
       )}
 
-      <dialog ref={gateDialogRef} className="export-gate-dialog" onClose={() => setExportGate(null)}>
-        {exportGate && (
-          <article>
-            <h3>Проверьте полноту анонимизации</h3>
-            <p>
-              {exportGate.nerFailed
-                ? 'Проверка неполная: NER недоступен. Имена, компании и адреса могли остаться в тексте. Повторите проверку или подтвердите экспорт без полной проверки.'
-                : 'Остались непросмотренные кандидаты «серой зоны» — они не заменяются автоматически. Просмотрите их в секции «Проверьте вручную» или экспортируйте как есть.'}
-            </p>
-            <ul className="export-gate-stats">
-              <li>Заменяется сущностей: <b>{exportGate.replaced}</b></li>
-              <li>Кандидатов не просмотрено: <b>{exportGate.unreviewed}</b></li>
-              <li>{exportGate.nerFailed ? 'Попытка проверки' : 'Контрольный проход'}: {new Date(exportGate.passAt).toLocaleString('ru-RU')}</li>
-            </ul>
-            <footer>
-              <button type="button" className="secondary" onClick={() => setExportGate(null)}>
-                Вернуться к проверке
-              </button>
-              <button type="button" onClick={() => { performMdExport(exportGate); setExportGate(null) }}>
-                Экспортировать всё равно
-              </button>
-            </footer>
-          </article>
-        )}
-      </dialog>
     </div>
   )
 }

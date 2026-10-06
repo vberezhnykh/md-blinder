@@ -17,9 +17,8 @@ export interface AnonSegment {
   opaque: boolean    // true = inserted placeholder / escaped literal (no linear source mapping)
 }
 
-// Как buildAnonymizedText, но дополнительно возвращает карту сегментов для
-// обратного пересчёта офсетов (нужно контрольному проходу B2). Порядок разрешения
-// пересечений тот же, поэтому текст
+// Как buildAnonymizedText, но дополнительно возвращает карту сегментов
+// исходник → результат. Порядок разрешения пересечений тот же, поэтому текст
 // побайтово совпадает с buildAnonymizedText.
 export function buildAnonymizedTextWithMap(
   sourceText: string,
@@ -79,23 +78,6 @@ export function buildAnonymizedTextWithMap(
     out += sourceText.slice(src)
   }
   return { text: out, segments }
-}
-
-// Пересчёт диапазона из анонимизированного текста обратно в исходный. Возвращает
-// null, если диапазон не помещается целиком в один verbatim-сегмент (т.е. задевает
-// плейсхолдер) — такие находки контрольный проход игнорирует.
-export function mapAnonRangeToSource(
-  start: number,
-  end: number,
-  segments: AnonSegment[],
-): { start: number; end: number } | null {
-  for (const s of segments) {
-    if (s.opaque) continue
-    if (start >= s.outStart && end <= s.outEnd) {
-      return { start: s.srcStart + (start - s.outStart), end: s.srcStart + (end - s.outStart) }
-    }
-  }
-  return null
 }
 
 // Current original text of an entity = slice of its first occurrence in the live doc.

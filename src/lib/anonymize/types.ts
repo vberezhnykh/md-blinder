@@ -38,7 +38,7 @@ export interface Entity {
   score?: number          // уверенность NER репрезентативного матча (undefined для структурных/ручных)
   candidate?: boolean     // true = непроверенный кандидат «серой зоны»; не идёт в вывод, пока не принят
   candidateNote?: string  // причина попадания в кандидаты, показывается в UI
-  dismissed?: boolean     // true = кандидат отклонён вручную; скрыт из UI и пропускается контрольным проходом
+  dismissed?: boolean     // true = кандидат отклонён вручную; скрыт из UI
 }
 
 export interface AnonymizationResult {

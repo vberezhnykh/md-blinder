@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildAnonymizedText, buildAnonymizedTextWithMap, mapAnonRangeToSource } from './apply'
+import { buildAnonymizedText, buildAnonymizedTextWithMap } from './apply'
 import { findImageRanges, IMAGE_REMOVED_MARKER, maskImagesForDetection } from './imageSafety'
 import { detectStructural } from './regexDetectors'
 import type { Entity } from './types'
@@ -14,11 +14,8 @@ describe('image safety', () => {
     '<svg><image href="data:image/png;base64,QWxpY2U=" /></svg>',
   ])('removes the complete image and its identifying metadata: %s', (sourceImage) => {
     const source = `Before ${sourceImage} After alice@example.com`
-    const { text, segments } = buildAnonymizedTextWithMap(source, [])
+    const { text } = buildAnonymizedTextWithMap(source, [])
     expect(text).toBe(`Before ${IMAGE_REMOVED_MARKER} After alice@example.com`)
-    const emailStart = text.indexOf('alice@example.com')
-    expect(mapAnonRangeToSource(emailStart, emailStart + 17, segments)).toEqual({ start: source.indexOf('alice@example.com'), end: source.length })
-    expect(mapAnonRangeToSource(7, 7 + IMAGE_REMOVED_MARKER.length, segments)).toBeNull()
     expect(source).toContain(sourceImage)
   })
 

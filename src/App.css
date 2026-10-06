@@ -208,10 +208,6 @@
   min-width: 13rem;
 }
 
-.second-pass-info {
-  margin-top: 6px;
-}
-
 .markdown-preview {
   width: 100%;
   min-height: 420px;
@@ -839,14 +835,6 @@
   cursor: pointer;
 }
 
-.export-gate-dialog article { max-width: 30rem; }
-.export-gate-stats { margin: 0 0 1rem; }
-.export-gate-dialog footer {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.export-gate-dialog footer button { margin: 0; width: auto; }
 [hidden] {
   display: none !important;
 }

@@ -1,58 +1,6 @@
-import { test, expect, type BrowserContext, type Download, type Page, type Route } from '@playwright/test'
+import { test, expect, type Download, type Page } from '@playwright/test'
 import type { HistoryDoc } from '../../src/lib/history'
-import type { Entity, RawMatch } from '../../src/lib/anonymize/types'
-
-// Only the costly NER boundary is substituted. The production build's React,
-// CodeMirror, structural detection workers, IndexedDB and downloads run as-is.
-// Holding an inference HTTP response makes the race tests independent of the
-// machine's speed and avoids downloading the model in CI.
-const nerWorker = `
-  self.onmessage = async ({ data }) => {
-    self.postMessage({ requestId: data.requestId, type: 'progress', stage: 'detect', chunk: 0, chunks: 1 });
-    try {
-      const response = await fetch('/__audit_ner_response__', {
-        method: 'POST', body: JSON.stringify(data),
-      });
-      const result = await response.json();
-      self.postMessage({ requestId: data.requestId, ...result });
-    } catch (error) {
-      self.postMessage({ requestId: data.requestId, type: 'error', error: String(error) });
-    }
-  };
-`
-
-interface Inference {
-  text: string
-  succeed: (matches?: RawMatch[]) => Promise<void>
-  fail: () => Promise<void>
-}
-
-async function mockNer(context: BrowserContext) {
-  const pending: Inference[] = []
-  const listeners: ((request: Inference) => void)[] = []
-  await context.route(/\/ner\.worker(?:-[^/]+)?\.(?:js|ts)(?:\?.*)?$/, (route) =>
-    route.fulfill({ contentType: 'application/javascript', body: nerWorker }))
-  await context.route('**/__audit_ner_response__', async (route: Route) => {
-    const input = route.request().postDataJSON() as { text: string }
-    const request: Inference = {
-      text: input.text,
-      succeed: (matches = []) => route.fulfill({ json: { type: 'done', matches } }),
-      fail: () => route.fulfill({ json: { type: 'error', error: 'Synthetic NER failure' } }),
-    }
-    const listener = listeners.shift()
-    if (listener) listener(request)
-    else pending.push(request)
-  })
-  // Unexpected real model requests fail immediately rather than downloading
-  // hundreds of MB if an asset name or inference protocol changes.
-  await context.route(/https:\/\/(?:huggingface\.co|cdn\.jsdelivr\.net)\//, (route) => route.abort())
-  return {
-    next(): Promise<Inference> {
-      const request = pending.shift()
-      return request ? Promise.resolve(request) : new Promise((resolve) => listeners.push(resolve))
-    },
-  }
-}
+import type { Entity } from '../../src/lib/anonymize/types'
 
 function person(text: string, anonymize = true): Entity {
   const start = text.indexOf('Alex')
@@ -120,75 +68,31 @@ async function history(page: Page) {
   await expect(page.locator('.history-panel')).toBeVisible()
 }
 
-test('export rejects a stale revision and a retry exports the latest anonymization', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  const text = 'Sensitive Alex'
-  await seed(page, [document('A', text, [person(text, false)])])
+test('export and copy use the current anonymization immediately and report unreviewed candidates', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const text = 'Sensitive Alex, contact alice@example.test'
+  const start = text.indexOf('alice@example.test')
+  const candidate: Entity = {
+    id: 'email-candidate', type: 'EMAIL', value: 'alice@example.test', placeholder: '[EMAIL_1]',
+    positions: [{ start, end: start + 18 }], anonymize: false, manual: false, candidate: true,
+  }
+  await seed(page, [document('A', text, [person(text, false), candidate])])
   await open(page, 'A')
-  const downloads: Download[] = []
-  page.on('download', (download) => downloads.push(download))
-  const exportButton = page.getByRole('button', { name: 'Экспортировать .md', exact: true })
-  await exportButton.click()
-  const stalePass = await ner.next()
-  expect(stalePass.text).toBe(text)
-  await page.locator('.entity-row input[type=checkbox]').check()
-  await stalePass.succeed()
-  await expect(exportButton).toBeEnabled()
-  await expect(page.locator('.second-pass-info')).toContainText(/измен|устар|повтор/i)
-  expect(downloads).toHaveLength(0)
+  await expect(page.getByRole('button', { name: 'Контрольная проверка' })).toHaveCount(0)
+  await page.locator('.entity-row:not(.candidate-row) input[type=checkbox]').check()
 
-  await exportButton.click()
-  const freshPass = await ner.next()
-  // The NER client strips inline Markdown markers, including underscores.
-  expect(freshPass.text).toBe('Sensitive [PERSON1]')
   const downloadPromise = page.waitForEvent('download')
-  await freshPass.succeed()
-  expect(await downloadedText(await downloadPromise)).toBe('Sensitive [PERSON_1]')
-  expect(downloads).toHaveLength(1)
-})
+  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
+  expect(await downloadedText(await downloadPromise)).toBe('Sensitive [PERSON_1], contact alice@example.test')
+  await expect(page.locator('dialog')).toHaveCount(0)
+  await expect(page.locator('.result')).toContainText(/Файл сохранён.*кандидатов «серой зоны»: 1/s)
 
-test('a control pass cannot add findings at offsets from a pre-edit revision', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  await seed(page, [document('A', 'Contact alice@example.test')])
-  await open(page, 'A')
-  const check = page.getByRole('button', { name: 'Контрольная проверка', exact: true })
-  await check.click()
-  const stalePass = await ner.next()
-  const editor = page.locator('.cm-content')
-  await editor.press('Control+Home')
-  await page.keyboard.insertText('PREFIX ')
-  await stalePass.succeed()
-  await expect(check).toBeEnabled()
-  await expect(page.locator('.second-pass-info')).toContainText(/измен|устар|повтор/i)
-  await expect(page.locator('.candidate-row')).toHaveCount(0)
-  await expect(editor).toHaveText('PREFIX Contact alice@example.test')
-
-  await check.click()
-  await (await ner.next()).succeed()
-  await expect(page.locator('.candidate-row')).toHaveCount(1)
-  await expect(page.locator('.cm-entity-candidate')).toHaveText('alice@example.test')
-})
-
-test('switching A to B discards the unfinished control pass from A', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  const bText = 'BBBB BBBB BBBB BBBB BBBB BBBB BBBB'
-  await seed(page, [document('A', 'Contact alice@example.test'), document('B', bText)])
-  await open(page, 'A')
-  await page.getByRole('button', { name: 'Контрольная проверка', exact: true }).click()
-  const stalePass = await ner.next()
-  await history(page)
-  await open(page, 'B')
-  await stalePass.succeed()
-  await expect(page.locator('.cm-content')).toHaveText(bText)
-  await expect(page.locator('.entity-row')).toHaveCount(0)
-  expect((await readSaved(page, 'B'))?.entities).toEqual([])
-  // Starting a new pass also proves cancellation released the shared job slot.
-  await page.getByRole('button', { name: 'Контрольная проверка', exact: true }).click()
-  const bPass = await ner.next()
-  expect(bPass.text).toBe(bText)
-  await bPass.succeed()
-  await expect(page.locator('.second-pass-info')).toContainText('не нашёл пропусков')
-  await expect(page.locator('.entity-row')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Копировать текст', exact: true }).click()
+  await expect(page.locator('.result')).toContainText(/Текст скопирован.*кандидатов «серой зоны»: 1/s)
+  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
+  const acceptedDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
+  expect(await downloadedText(await acceptedDownload)).toBe('Sensitive [PERSON_1], contact [EMAIL_1]')
 })
 
 test('delete, undo and redo restore text and anonymization as one history event', async ({ page }) => {
@@ -247,52 +151,6 @@ test('the only open document can be reopened from history without losing undo', 
   await expect(editor).toHaveText('original text EDITED')
   await editor.press('Control+z')
   await expect(editor).toHaveText('original text')
-})
-
-test('failed NER requires explicit export acknowledgment even with no candidates', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  const text = 'Sensitive Alex'
-  await seed(page, [document('A', text, [person(text)])])
-  await open(page, 'A')
-  const downloads: Download[] = []
-  page.on('download', (download) => downloads.push(download))
-  const exportButton = page.getByRole('button', { name: 'Экспортировать .md', exact: true })
-  await exportButton.click()
-  await (await ner.next()).fail()
-  const dialog = page.locator('dialog.export-gate-dialog')
-  await expect(dialog).toBeVisible()
-  await expect(dialog).toContainText(/NER|модел|не удалось|не заверш/i)
-  expect(downloads).toHaveLength(0)
-  await dialog.getByRole('button', { name: 'Вернуться к проверке', exact: true }).click()
-  await expect(dialog).not.toBeVisible()
-  expect(downloads).toHaveLength(0)
-
-  await exportButton.click()
-  await (await ner.next()).fail()
-  await expect(dialog).toBeVisible()
-  const downloadPromise = page.waitForEvent('download')
-  await dialog.getByRole('button', { name: 'Экспортировать всё равно', exact: true }).click()
-  expect(await downloadedText(await downloadPromise)).toBe('Sensitive [PERSON_1]')
-  expect(downloads).toHaveLength(1)
-})
-
-test('fresh control findings must be reviewed before the checked snapshot exports', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  await seed(page, [document('A', 'Contact alice@example.test')])
-  await open(page, 'A')
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
-  await (await ner.next()).succeed()
-  const dialog = page.locator('dialog.export-gate-dialog')
-  await expect(dialog).toBeVisible()
-  await expect(page.locator('.candidate-row')).toHaveCount(1)
-  await dialog.getByRole('button', { name: 'Вернуться к проверке', exact: true }).click()
-  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
-  const checkedPass = await ner.next()
-  expect(checkedPass.text).toBe('Contact [EMAIL1]')
-  const downloadPromise = page.waitForEvent('download')
-  await checkedPass.succeed()
-  expect(await downloadedText(await downloadPromise)).toBe('Contact [EMAIL_1]')
 })
 
 test('IndexedDB v1 migration preserves documents and populates the metadata history', async ({ page }) => {
@@ -374,7 +232,6 @@ test('importing a newer revision of the current document updates the reopened ed
 })
 
 test('embedded image payloads are removed from preview, clipboard and downloaded Markdown', async ({ page, context }) => {
-  const ner = await mockNer(context)
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
   // Synthetic one-pixel image; no real document or personal data is involved.
   const payload = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
@@ -390,32 +247,8 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   // The native Windows clipboard converts line endings to CRLF.
   const copied = await page.evaluate(() => navigator.clipboard.readText())
   expect(copied.replace(/\r\n/g, '\n')).toBe(expected)
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
-  const pass = await ner.next()
-  expect(pass.text).not.toContain('data:image')
-  expect(pass.text).not.toContain(payload)
-  expect(pass.text).not.toContain('harmlessimage')
   const downloadPromise = page.waitForEvent('download')
-  await pass.succeed()
+  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await downloadPromise)).toBe(expected)
   expect((await readSaved(page, 'images'))?.sourceText).toBe(source)
-})
-
-test('deleting a document cancels its pending pass without recreating it in history', async ({ page, context }) => {
-  const ner = await mockNer(context)
-  await seed(page, [document('A', 'Contact alice@example.test')])
-  await open(page, 'A')
-  await page.getByRole('button', { name: 'Контрольная проверка', exact: true }).click()
-  const pass = await ner.next()
-  await history(page)
-  await page.locator('.history-row').getByTitle('Удалить', { exact: true }).click()
-  await expect(page.locator('.history-row')).toHaveCount(0)
-  await pass.succeed()
-  // Observe beyond the autosave debounce: a late candidate result must not
-  // queue a write that silently resurrects the already-deleted document.
-  await page.waitForTimeout(1_000)
-  expect(await readSaved(page, 'A')).toBeUndefined()
-  await expect(page.locator('.history-row')).toHaveCount(0)
-  await page.reload()
-  await expect(page.locator('.history-panel')).toContainText('История пуста')
 })
