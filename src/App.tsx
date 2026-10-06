@@ -3,11 +3,12 @@ import { detectFileKind } from './lib/fileType'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedText, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { findImageRanges } from './lib/anonymize/imageSafety'
 import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
 import { copyText } from './lib/clipboard'
+import { plural } from './lib/plural'
 import type { Entity, EntityType } from './lib/anonymize/types'
 import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDocMeta } from './lib/history'
 import { useDocumentSession } from './hooks/useDocumentSession'
@@ -16,10 +17,22 @@ import { useHistoryStore } from './hooks/useHistoryStore'
 import ReplacementTable from './components/ReplacementTable'
 import EntityList from './components/EntityList'
 import HistoryPanel from './components/HistoryPanel'
+import AnonymizedPreview from './components/AnonymizedPreview'
+import Toast, { type ToastState } from './components/Toast'
 import './App.css'
 
 const EntityEditor = lazy(() => import('./components/EntityEditor'))
 const EMPTY_ENTITIES: Entity[] = []
+// Сколько секунд удаленный из истории документ можно вернуть.
+const DELETE_UNDO_MS = 8000
+
+function baseName(name: string): string {
+  return name.replace(/\.(docx?|pdf)$/i, '') || 'document'
+}
+
+function shorten(s: string, n = 48): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
+}
 
 function downloadBlob(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
@@ -71,10 +84,18 @@ function App() {
   const [elapsedSec, setElapsedSec] = useState(0)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
   const [forceOcr, setForceOcr] = useState(false)
-  // Результат последнего копирования/экспорта привязан к тексту, который ушёл
-  // наружу: любая правка сразу снимает «Скопировано ✓» и подсказку.
-  const [actionResult, setActionResult] = useState<{ text: string; state: 'copied' | 'copy-error' | 'exported' } | null>(null)
+  const [toast, setToast] = useState<ToastState | null>(null)
+  const toastKey = useRef(0)
+  // Удаление из истории откладывается, пока в уведомлении доступна «Вернуть».
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const pendingDeleteRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const showToast = useCallback((next: Omit<ToastState, 'key'>) => {
+    toastKey.current += 1
+    setToast({ ...next, key: toastKey.current })
+  }, [])
+  const closeToast = useCallback(() => setToast(null), [])
 
   const cancelAnalysis = useCallback(() => {
     cancelJob()
@@ -89,11 +110,12 @@ function App() {
     return () => clearInterval(id)
   }, [status])
 
-  const anonymizedText = useMemo(
-    () => buildAnonymizedText(sourceText, entities),
+  const anonymized = useMemo(
+    () => buildAnonymizedTextWithMap(sourceText, entities),
     [sourceText, entities],
   )
-  const actionState = actionResult?.text === anonymizedText ? actionResult.state : 'idle'
+  const anonymizedText = anonymized.text
+  const unreviewedCount = useMemo(() => entities.filter((e) => e.candidate && !e.dismissed).length, [entities])
 
   const handleOpenDoc = useCallback(async (meta: HistoryDocMeta) => {
     cancelAnalysis()
@@ -134,6 +156,42 @@ function App() {
       await refreshHistory()
     } catch (err) { setHistoryError(String(err)) }
   }, [flush, snapshotRef, replace, cancelAnalysis, refreshHistory, setHistoryError])
+
+  const commitPendingDelete = useCallback(() => {
+    const pending = pendingDeleteRef.current
+    if (!pending) return
+    clearTimeout(pending.timer)
+    pendingDeleteRef.current = null
+    setPendingDeleteId(null)
+    void handleDeleteDoc(pending.id)
+  }, [handleDeleteDoc])
+
+  const undoDelete = useCallback(() => {
+    const pending = pendingDeleteRef.current
+    if (!pending) return
+    clearTimeout(pending.timer)
+    pendingDeleteRef.current = null
+    setPendingDeleteId(null)
+    setToast(null)
+  }, [])
+
+  const requestDeleteDoc = useCallback((meta: HistoryDocMeta) => {
+    commitPendingDelete()
+    const timer = setTimeout(commitPendingDelete, DELETE_UNDO_MS)
+    pendingDeleteRef.current = { id: meta.id, timer }
+    setPendingDeleteId(meta.id)
+    showToast({
+      text: `Документ «${shorten(meta.name)}» удален.`,
+      action: { label: 'Вернуть', onClick: undoDelete },
+      durationMs: DELETE_UNDO_MS,
+    })
+  }, [commitPendingDelete, undoDelete, showToast])
+
+  // При закрытии вкладки отложенное удаление выполняется сразу.
+  useEffect(() => {
+    window.addEventListener('pagehide', commitPendingDelete)
+    return () => window.removeEventListener('pagehide', commitPendingDelete)
+  }, [commitPendingDelete])
 
   const handleExportHistory = useCallback(async () => {
     try {
@@ -257,37 +315,44 @@ function App() {
     if (file) void processFile(file)
   }
 
-  // Копирование и экспорт мгновенные: текст берётся из текущей разметки без
-  // повторного прогона NER. Непросмотренные кандидаты не блокируют действие —
-  // о них сообщает подсказка после копирования или скачивания.
+  const showCandidates = useCallback(() => {
+    setView('editor')
+    requestAnimationFrame(() => {
+      document.getElementById('candidates')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }, [])
+
+  // Копирование и экспорт мгновенные: текст берется из текущей разметки без
+  // повторного прогона NER. Непроверенные кандидаты не блокируют действие —
+  // о них напоминают счетчик рядом с кнопками и уведомление после действия.
+  const notifyDone = useCallback((done: string) => {
+    if (unreviewedCount === 0) {
+      showToast({ text: done, durationMs: 3000 })
+      return
+    }
+    showToast({
+      text: `${done} Не проверено: ${plural(unreviewedCount, ['кандидат', 'кандидата', 'кандидатов'])} — в тексте они остались без замены.`,
+      tone: 'warn',
+      action: { label: 'Показать', onClick: () => { setToast(null); showCandidates() } },
+      durationMs: 8000,
+    })
+  }, [unreviewedCount, showToast, showCandidates])
+
   const handleCopy = useCallback(async () => {
     const ok = await copyText(anonymizedText)
-    setActionResult({ text: anonymizedText, state: ok ? 'copied' : 'copy-error' })
-  }, [anonymizedText])
+    if (ok) notifyDone('Текст скопирован.')
+    else showToast({ text: 'Не удалось скопировать текст. Браузер не дал доступ к буферу обмена.', tone: 'error', durationMs: 6000 })
+  }, [anonymizedText, notifyDone, showToast])
 
   const handleExport = useCallback(() => {
-    const base = fileName.replace(/\.(docx?|pdf)$/i, '') || 'document'
-    downloadBlob(new Blob([anonymizedText], { type: 'text/markdown;charset=utf-8' }), `${base}.md`)
-    setActionResult({ text: anonymizedText, state: 'exported' })
-  }, [anonymizedText, fileName])
-
-  // Status is derived from the copied text, so edits invalidate it immediately.
-  useEffect(() => {
-    if (actionState === 'idle') return
-    const id = setTimeout(() => setActionResult(null), 2500)
-    return () => clearTimeout(id)
-  }, [actionState])
+    const name = `${baseName(fileName)}.md`
+    downloadBlob(new Blob([anonymizedText], { type: 'text/markdown;charset=utf-8' }), name)
+    notifyDone(`Файл «${shorten(name, 40)}» сохранен.`)
+  }, [anonymizedText, fileName, notifyDone])
 
   const handleExportCsv = () => {
     const csv = entitiesToCsv(entities, sourceText)
-    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    const base = fileName.replace(/\.(docx?|pdf)$/i, '') || 'document'
-    a.href = url
-    a.download = `${base}-replacements.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), `${baseName(fileName)}-replacements.csv`)
   }
 
   const handleToggle = useCallback((id: string) => {
@@ -344,7 +409,17 @@ function App() {
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
   const activeCount = entities.filter((e) => e.anonymize).length
-  const unreviewedCount = entities.filter((e) => e.candidate).length
+  const visibleHistory = useMemo(
+    () => (pendingDeleteId ? history.filter((d) => d.id !== pendingDeleteId) : history),
+    [history, pendingDeleteId],
+  )
+  const openFilePicker = () => { if (!isLoading) fileInputRef.current?.click() }
+  const ocrOption = !isLoading && (
+    <label className="ocr-option" title="Для PDF, где текстовый слой поврежден или распознается с ошибками">
+      <input type="checkbox" checked={forceOcr} onChange={(event) => setForceOcr(event.target.checked)} />
+      Распознавать все страницы следующего PDF через OCR
+    </label>
+  )
   const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
   const imageCount = useMemo(() => findImageRanges(sourceText).length, [sourceText])
 
@@ -362,38 +437,62 @@ function App() {
         <header className="app-header">
           <h1>MD Blinder</h1>
           <p>
-            Конвертация договоров (.docx, .pdf) в Markdown — всё в браузере, без сервера.
-            Сканы PDF распознаются через OCR, чувствительные данные анонимизируются.
+            Конвертация договоров (.docx, .pdf) в Markdown с обезличиванием. Все работает в браузере,
+            документы никуда не отправляются. Сканы PDF распознаются через OCR.
           </p>
         </header>
       )}
 
-      {!hasResult ? (
-        <div
-          className={`dropzone ${isDragging ? 'dragging' : ''} ${isLoading ? 'loading' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            if (!isLoading) setIsDragging(true)
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => !isLoading && fileInputRef.current?.click()}
-        >
-          <p>Перетащите .docx или .pdf файл сюда или нажмите, чтобы выбрать</p>
-          <p className="dropzone-hint">
-            Поддерживаются текстовые и сканированные PDF (распознавание через OCR)
-          </p>
-          {fileName && <p className="filename">Файл: {fileName}</p>}
+      {!hasResult && (
+        <div className="upload">
+          <div
+            className={`dropzone ${isDragging ? 'dragging' : ''} ${isLoading ? 'loading' : ''}`}
+            role="button"
+            tabIndex={isLoading ? -1 : 0}
+            aria-disabled={isLoading}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (!isLoading) setIsDragging(true)
+            }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={openFilePicker}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                openFilePicker()
+              }
+            }}
+          >
+            <p>Перетащите .docx или .pdf файл сюда или нажмите, чтобы выбрать</p>
+            <p className="dropzone-hint">
+              Поддерживаются текстовые и сканированные PDF (распознавание через OCR)
+            </p>
+            {fileName && <p className="filename">Файл: {fileName}</p>}
+          </div>
+          {ocrOption}
         </div>
-      ) : null}
+      )}
+
+      {status === 'loading' && (
+        <div className="status-block">
+          <p className="status status-loading" aria-live="polite">
+            <span className="spinner" aria-hidden="true" />
+            {statusLabel(progress, elapsedSec)}
+          </p>
+          {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
+          <button type="button" onClick={cancelAnalysis}>Отменить обработку</button>
+        </div>
+      )}
+      {status === 'error' && <p className="status error">{error}</p>}
 
       {!hasResult && (
         <HistoryPanel
-          docs={history}
+          docs={visibleHistory}
           currentId={currentDocId}
           errorText={historyError}
           onOpen={(doc) => { void handleOpenDoc(doc) }}
-          onDelete={(id) => { void handleDeleteDoc(id) }}
+          onDelete={requestDeleteDoc}
           onExport={() => { void handleExportHistory() }}
           onImport={(file) => { void handleImportHistory(file) }}
         />
@@ -409,8 +508,11 @@ function App() {
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
         >
+          <span className="brand">MD Blinder</span>
           {fileName && <span className="filename-compact" title={fileName}>{fileName}</span>}
-          <button type="button" onClick={() => !isLoading && fileInputRef.current?.click()}>
+          <span className="save-status" role="status">{historyError ? 'Ошибка сохранения' : saving ? 'Сохранение…' : 'Сохранено в браузере'}</span>
+          {ocrOption}
+          <button type="button" onClick={openFilePicker}>
             Загрузить другой файл
           </button>
           <button type="button" onClick={() => {
@@ -418,42 +520,20 @@ function App() {
           }}>
             История
           </button>
-          <span className="status-hint" role="status">{historyError ? 'Ошибка истории' : saving ? 'Сохранение…' : 'Сохранено в браузере'}</span>
         </div>
       )}
 
-      {!isLoading && (
-        <label className="ocr-option">
-          <input type="checkbox" checked={forceOcr} onChange={(event) => setForceOcr(event.target.checked)} />
-          Распознать все страницы следующего PDF через OCR
-        </label>
-      )}
-
-      {status === 'loading' && (
-        <>
-          <p className="status status-loading" aria-live="polite">
-            <span className="spinner" aria-hidden="true" />
-            {statusLabel(progress, elapsedSec)}
-          </p>
-          {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
-        </>
-      )}
-      {status === 'error' && <p className="status error">{error}</p>}
       {hasResult && historyError && <p className="status error" role="alert">
         {historyError} <button type="button" onClick={() => { void flush().catch(() => {}) }}>Повторить сохранение</button>
       </p>}
-      {isLoading && <button type="button" onClick={cancelAnalysis}>Отменить обработку</button>}
 
       {snapshot.doc && (
-        <section className="result" hidden={!hasResult}>
-          <div className="result-header">
-            <h2>Результат</h2>
-          </div>
-
+        <section className="result" hidden={!hasResult} aria-label="Документ">
           {nerNotice && (
             <p className="ner-notice">
-              NER-модель не загрузилась (нужен интернет при первом запуске). Показаны только
-              структурные данные (регулярки).
+              Модель распознавания имен, компаний и адресов не загрузилась (при первом запуске нужен
+              интернет). Найдены только данные, которые определяются по шаблону: телефоны, email,
+              реквизиты, номера документов.
             </p>
           )}
           {imageCount > 0 && <p className="image-notice">
@@ -463,17 +543,18 @@ function App() {
 
           {placeholderCollision && (
             <p className="collision-notice">
-              Внимание: документ уже содержит текст вида [PERSON_1] — он может путаться с
-              плейсхолдерами анонимизации. В экспортируемом файле такие фрагменты экранируются.
+              В документе уже есть текст вида [PERSON_1], похожий на метки замены. В итоговом тексте
+              такие фрагменты экранируются, чтобы их нельзя было спутать.
             </p>
           )}
 
           <div className="result-toolbar">
             {showViewToggle && (
-              <div className="view-toggle">
+              <div className="view-toggle" role="group" aria-label="Вид">
                 <button
                   type="button"
                   className={view === 'editor' ? 'active' : ''}
+                  aria-pressed={view === 'editor'}
                   onClick={() => setView('editor')}
                 >
                   Редактор
@@ -481,6 +562,7 @@ function App() {
                 <button
                   type="button"
                   className={view === 'anonymized' ? 'active' : ''}
+                  aria-pressed={view === 'anonymized'}
                   onClick={() => setView('anonymized')}
                 >
                   Анонимизированный
@@ -488,75 +570,74 @@ function App() {
               </div>
             )}
             <div className="result-actions">
-              <button type="button" onClick={handleExport}>
-                Экспортировать .md
-              </button>
-              <button
-                type="button"
-                className="copy-action"
-                onClick={() => void handleCopy()}
-                aria-live="polite"
-              >
-                {actionState === 'copied'
-                  ? 'Скопировано ✓'
-                  : actionState === 'copy-error'
-                    ? 'Не удалось скопировать'
-                    : 'Копировать текст'}
-              </button>
-              {entities.length > 0 && (
-                <button type="button" onClick={handleExportCsv}>
-                  Экспортировать таблицу (.csv)
+              {unreviewedCount > 0 && (
+                <button type="button" className="unreviewed-badge" onClick={showCandidates}>
+                  Не проверено: {plural(unreviewedCount, ['кандидат', 'кандидата', 'кандидатов'])}
                 </button>
               )}
+              <button type="button" onClick={() => void handleCopy()}>
+                Копировать текст
+              </button>
+              <button type="button" className="primary" onClick={handleExport}>
+                Экспортировать .md
+              </button>
             </div>
           </div>
 
-          {(actionState === 'copied' || actionState === 'exported') && unreviewedCount > 0 && (
-            <p className="status-hint">
-              {actionState === 'copied' ? 'Текст скопирован' : 'Файл сохранён'}. Непросмотренных
-              кандидатов «серой зоны»: <b>{unreviewedCount}</b> — они не заменены. Проверьте секцию
-              «Проверьте вручную».
-            </p>
-          )}
+          <div className="editor-layout" hidden={view !== 'editor'}>
+            <Suspense fallback={<p role="status">Загрузка редактора…</p>}>
+            <EntityEditor
+              key={currentDocId}
+              value={sourceText}
+              entities={entities}
+              onChange={handleEditorChange}
+              onAddEntity={handleAddEntity}
+              onAttachToEntity={handleAttachToEntity}
+              selectedType={selectedType}
+              onSelectedTypeChange={setSelectedType}
+              reveal={reveal}
+              onMergeEntity={handleMergeEntity}
+            />
+            </Suspense>
+            <EntityList
+              entities={entities}
+              sourceText={sourceText}
+              onToggle={handleToggle}
+              onChangeType={handleChangeType}
+              onDelete={handleDelete}
+              onSelect={handleSelectEntity}
+              onAcceptCandidate={handleAcceptCandidate}
+              onRejectCandidate={handleRejectCandidate}
+              onMergeEntity={handleMergeEntity}
+            />
+          </div>
+          <AnonymizedPreview
+            text={anonymizedText}
+            sourceText={sourceText}
+            segments={anonymized.segments}
+            entities={entities}
+            hidden={view !== 'anonymized'}
+          />
 
-            <div className="editor-layout" hidden={view !== 'editor'}>
-              <Suspense fallback={<p role="status">Загрузка редактора…</p>}>
-              <EntityEditor
-                key={currentDocId}
-                value={sourceText}
-                entities={entities}
-                onChange={handleEditorChange}
-                onAddEntity={handleAddEntity}
-                onAttachToEntity={handleAttachToEntity}
-                selectedType={selectedType}
-                onSelectedTypeChange={setSelectedType}
-                reveal={reveal}
-                onMergeEntity={handleMergeEntity}
-              />
-              </Suspense>
-              <EntityList
-                entities={entities}
-                sourceText={sourceText}
-                onToggle={handleToggle}
-                onChangeType={handleChangeType}
-                onDelete={handleDelete}
-                onSelect={handleSelectEntity}
-                onAcceptCandidate={handleAcceptCandidate}
-                onRejectCandidate={handleRejectCandidate}
-                onMergeEntity={handleMergeEntity}
-              />
-            </div>
-            <pre className="markdown-preview anonymized-preview" hidden={view !== 'anonymized'}>{anonymizedText}</pre>
-
-          {activeCount > 0 && (
-            <section className="replacement-section">
-              <h3>Таблица замен ({activeCount})</h3>
+          {entities.length > 0 && (
+            <details className="replacement-section">
+              <summary>Таблица замен ({activeCount})</summary>
+              <div className="replacement-csv">
+                <p>
+                  Таблица содержит исходные данные и позволяет восстановить текст. Не передавайте ее
+                  вместе с обезличенным документом.
+                </p>
+                <button type="button" onClick={handleExportCsv}>
+                  Скачать таблицу замен (.csv)
+                </button>
+              </div>
               <ReplacementTable entities={entities} sourceText={sourceText} />
-            </section>
+            </details>
           )}
         </section>
       )}
 
+      <Toast toast={toast} onClose={closeToast} />
     </div>
   )
 }

@@ -4,7 +4,9 @@ import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { Decoration, type DecorationSet, hoverTooltip, WidgetType } from '@codemirror/view'
 import { StateEffect, StateField } from '@codemirror/state'
-import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+import { tags } from '@lezer/highlight'
+import { ALL_ENTITY_TYPES, ENTITY_TYPE_LABELS, type Entity, type EntityType } from '../lib/anonymize/types'
 import { snapToWordBoundary } from '../lib/wordSnap'
 import {
   entityMetadataField,
@@ -133,19 +135,52 @@ const entityDecorationField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
+// Цвета берутся из токенов приложения, поэтому одна тема работает и в светлом,
+// и в темном режиме. Базовая тема CodeMirror светлая: без этих правил нумерация
+// строк, активная строка и подсказки оставались светлыми на темном фоне.
 const editorTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
+    color: 'var(--ink)',
     fontSize: '13px',
   },
   '.cm-content': {
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     padding: '16px',
+    caretColor: 'var(--ink)',
   },
   '.cm-scroller': {
     overflow: 'auto',
   },
+  '.cm-gutters': {
+    backgroundColor: 'var(--sunk)',
+    color: 'var(--ink-3)',
+    borderRight: '1px solid var(--line)',
+  },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--accent-wash)', color: 'var(--ink-2)' },
+  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--accent-wash) 55%, transparent)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--ink)' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': {
+    backgroundColor: 'color-mix(in srgb, var(--accent) 28%, transparent)',
+  },
+  // basicSetup подсвечивает все совпадения выделенного слова. Заливка совпадала
+  // с цветами типов (зеленый ADDRESS) и выглядела как разметка — убираем ее.
+  '.cm-selectionMatch': { backgroundColor: 'transparent' },
+  '.cm-foldPlaceholder': { backgroundColor: 'var(--sunk)', border: '1px solid var(--line-2)', color: 'var(--ink-3)' },
+  '.cm-tooltip': { backgroundColor: 'var(--surface)', border: '1px solid var(--line-2)', color: 'var(--ink)' },
 })
+
+// Подсветка Markdown на токенах приложения. Стандартный стиль подчеркивал
+// заголовки как ссылки, а служебные «#» и «**» в темной теме почти сливались с фоном.
+const markdownHighlight = HighlightStyle.define([
+  { tag: tags.heading, fontWeight: '700' },
+  { tag: tags.strong, fontWeight: '700' },
+  { tag: tags.emphasis, fontStyle: 'italic' },
+  { tag: tags.strikethrough, textDecoration: 'line-through' },
+  { tag: [tags.link, tags.url], color: 'var(--accent)' },
+  { tag: [tags.processingInstruction, tags.meta, tags.contentSeparator], color: 'var(--ink-3)' },
+  { tag: tags.monospace, color: 'var(--ink-2)' },
+])
 
 function EntityEditor({
   value,
@@ -166,7 +201,6 @@ function EntityEditor({
   const onAddEntityRef = useRef(onAddEntity)
   const onAttachToEntityRef = useRef(onAttachToEntity)
   const onMergeEntityRef = useRef(onMergeEntity)
-  const [hasSelection, setHasSelection] = useState(false)
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
   const selectionPopupRef = useRef<SelectionPopupState | null>(null)
   const [activeSpan, setActiveSpan] = useState<ActiveSpan | null>(null)
@@ -199,7 +233,6 @@ function EntityEditor({
       }
       if (update.selectionSet) {
         const sel = update.state.selection.main
-        setHasSelection(!sel.empty)
         if (sel.empty) {
           setSelectionPopup(null)
           const head = sel.head
@@ -282,7 +315,7 @@ function EntityEditor({
               create: () => {
                 const dom = document.createElement('div')
                 dom.className = 'cm-entity-tooltip'
-                dom.textContent = `${e.placeholder} · ${e.type}${e.candidate ? ' · кандидат' : ''} · ${original}`
+                dom.textContent = `${e.placeholder} · ${ENTITY_TYPE_LABELS[e.type]}${e.candidate ? ' · на проверке' : ''} · ${original}`
                 return { dom }
               },
             }
@@ -387,6 +420,7 @@ function EntityEditor({
       extensions: [
         basicSetup,
         markdown(),
+        syntaxHighlighting(markdownHighlight),
         EditorView.lineWrapping,
         entityMetadataField.init(() => entitiesRef.current),
         entityMetadataHistory,
@@ -461,13 +495,6 @@ function EntityEditor({
     view.focus()
   }, [reveal])
 
-  const handleAddFromSelection = () => {
-    const view = viewRef.current
-    if (!view) return
-    const { from, to } = view.state.selection.main
-    if (from < to) onAddEntityRef.current(from, to)
-  }
-
   const handleAddFromPopup = () => {
     if (!selectionPopup) return
     if (attachTarget === '') {
@@ -486,21 +513,7 @@ function EntityEditor({
 
   return (
     <div className="editor-pane">
-      <div className="editor-toolbar">
-        <select
-          value={selectedType}
-          onChange={(e) => onSelectedTypeChange(e.target.value as EntityType)}
-        >
-          {ALL_ENTITY_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={handleAddFromSelection} disabled={!hasSelection}>
-          Добавить из выделения
-        </button>
-      </div>
+      <p className="editor-hint">Выделите текст, чтобы добавить его в замены.</p>
       <div ref={mountRef} />
       {selectionPopup &&
         createPortal(
@@ -510,6 +523,7 @@ function EntityEditor({
             onMouseDown={(e) => e.preventDefault()}
           >
             <select
+              aria-label="Тип"
               value={selectedType}
               disabled={attachTarget !== ''}
               onChange={(e) => {
@@ -520,17 +534,18 @@ function EntityEditor({
             >
               {ALL_ENTITY_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {ENTITY_TYPE_LABELS[t]}
                 </option>
               ))}
             </select>
             <select
+              aria-label="Куда добавить"
               className="cm-add-popup-target"
               value={attachTarget}
               onChange={(e) => setAttachTarget(e.target.value)}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              <option value="">— новая сущность —</option>
+              <option value="">новая замена</option>
               {entities
                 .filter((e) => e.type === selectedType && !e.candidate)
                 .map((e) => (
@@ -539,8 +554,8 @@ function EntityEditor({
                   </option>
                 ))}
             </select>
-            <button type="button" onClick={handleAddFromPopup}>
-              ＋
+            <button type="button" className="primary" onClick={handleAddFromPopup}>
+              Добавить
             </button>
           </div>,
           document.body,

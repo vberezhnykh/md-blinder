@@ -85,14 +85,50 @@ test('export and copy use the current anonymization immediately and report unrev
   await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await downloadPromise)).toBe('Sensitive [PERSON_1], contact alice@example.test')
   await expect(page.locator('dialog')).toHaveCount(0)
-  await expect(page.locator('.result')).toContainText(/Файл сохранён.*кандидатов «серой зоны»: 1/s)
+  await expect(page.locator('.toast')).toContainText('Не проверено: 1 кандидат')
+  await expect(page.getByRole('button', { name: 'Не проверено: 1 кандидат', exact: true })).toBeVisible()
+  // The candidate stays visible as unreplaced in the anonymized view.
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview mark.anon-unreplaced')).toHaveText('alice@example.test')
+  await expect(page.locator('.anonymized-preview mark.anon-replaced')).toHaveText('[PERSON_1]')
 
   await page.getByRole('button', { name: 'Копировать текст', exact: true }).click()
-  await expect(page.locator('.result')).toContainText(/Текст скопирован.*кандидатов «серой зоны»: 1/s)
+  await expect(page.locator('.toast')).toContainText(/Текст скопирован.*Не проверено: 1 кандидат/s)
+  await page.locator('.toast').getByRole('button', { name: 'Показать', exact: true }).click()
+  await expect(page.locator('.editor-layout')).toBeVisible()
   await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
   const acceptedDownload = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await acceptedDownload)).toBe('Sensitive [PERSON_1], contact [EMAIL_1]')
+  await expect(page.getByRole('button', { name: /Не проверено/ })).toHaveCount(0)
+})
+
+test('a deleted history document can be restored until the undo window closes', async ({ page }) => {
+  await seed(page, [document('A', 'first'), document('B', 'second')])
+  await page.locator('.history-row').filter({ hasText: 'Synthetic A.docx' }).getByTitle('Удалить', { exact: true }).click()
+  await expect(page.locator('.history-row')).toHaveCount(1)
+  await page.locator('.toast').getByRole('button', { name: 'Вернуть', exact: true }).click()
+  await expect(page.locator('.history-row')).toHaveCount(2)
+  expect(await readSaved(page, 'A')).toBeDefined()
+
+  await page.locator('.history-row').filter({ hasText: 'Synthetic A.docx' }).getByTitle('Удалить', { exact: true }).click()
+  await expect(page.locator('.history-row')).toHaveCount(1)
+  // Deleting another document commits the pending deletion immediately.
+  await page.locator('.history-row').filter({ hasText: 'Synthetic B.docx' }).getByTitle('Удалить', { exact: true }).click()
+  await expect.poll(() => readSaved(page, 'A')).toBeUndefined()
+  await page.locator('.toast').getByRole('button', { name: 'Вернуть', exact: true }).click()
+  await expect(page.locator('.history-row')).toHaveCount(1)
+  await page.reload()
+  await expect(page.locator('.history-row')).toHaveCount(1)
+  await expect(page.locator('.history-row')).toContainText('Synthetic B.docx')
+})
+
+test('the upload zone opens the file picker from the keyboard', async ({ page }) => {
+  await page.goto('/')
+  const chooser = page.waitForEvent('filechooser')
+  await page.locator('.dropzone').focus()
+  await page.keyboard.press('Enter')
+  await chooser
 })
 
 test('delete, undo and redo restore text and anonymization as one history event', async ({ page }) => {
@@ -243,7 +279,7 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
   await expect(page.locator('.anonymized-preview')).toHaveText(expected)
   await page.getByRole('button', { name: 'Копировать текст', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Скопировано ✓', exact: true })).toBeVisible()
+  await expect(page.locator('.toast')).toContainText('Текст скопирован')
   // The native Windows clipboard converts line endings to CRLF.
   const copied = await page.evaluate(() => navigator.clipboard.readText())
   expect(copied.replace(/\r\n/g, '\n')).toBe(expected)

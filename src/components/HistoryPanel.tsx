@@ -1,12 +1,13 @@
 import { useRef } from 'react'
 import type { HistoryDocMeta } from '../lib/history'
+import { plural } from '../lib/plural'
 
 interface HistoryPanelProps {
   docs: HistoryDocMeta[]
   currentId: string | null
   errorText?: string
   onOpen: (doc: HistoryDocMeta) => void
-  onDelete: (id: string) => void
+  onDelete: (doc: HistoryDocMeta) => void
   onExport: () => void
   onImport: (file: File) => void
 }
@@ -52,7 +53,7 @@ function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, 
               {doc.name}
             </span>
             <span className="history-meta">
-              {new Date(doc.updatedAt).toLocaleString('ru-RU')} · {doc.entityCount} сущностей · {doc.format}
+              {new Date(doc.updatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })} · {plural(doc.entityCount, ['находка', 'находки', 'находок'])} · {doc.format}
             </span>
             <button type="button" onClick={() => onOpen(doc)}>
               {doc.id === currentId ? 'Открыт' : 'Открыть'}
@@ -61,7 +62,8 @@ function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, 
               type="button"
               className="history-delete"
               title="Удалить"
-              onClick={() => onDelete(doc.id)}
+              aria-label={`Удалить «${doc.name}»`}
+              onClick={() => onDelete(doc)}
             >
               ✕
             </button>

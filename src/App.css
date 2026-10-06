@@ -1,4 +1,7 @@
 .app {
+  /* #root — колонка flex: без явной ширины .app сжимается по содержимому,
+     и ширина рабочей области менялась от экрана к экрану. */
+  width: 100%;
   max-width: 1360px;
   margin: 0 auto;
   padding: 32px 20px 64px;
@@ -24,6 +27,13 @@
   box-shadow: var(--shadow-sm);
   transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
   margin-top: 28px;
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: var(--radius);
+  border-color: var(--accent);
 }
 
 .dropzone:hover {
@@ -54,8 +64,9 @@
 
 .compact-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 9px 12px;
   margin-top: 24px;
   margin-bottom: 16px;
@@ -70,14 +81,34 @@
   background: var(--pico-primary-background, rgba(0, 0, 0, 0.03));
 }
 
+.compact-bar .brand {
+  font-weight: 780;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+}
+
 .compact-bar .filename-compact {
-  flex: 1 1 auto;
+  flex: 1 1 12rem;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--pico-muted-color);
+  color: var(--ink);
+  font-weight: 600;
   font-size: 14px;
+}
+
+.compact-bar .save-status {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.compact-bar .ocr-option {
+  margin: 0;
+  color: var(--ink-2);
 }
 
 .compact-bar button {
@@ -143,6 +174,14 @@
   margin-top: 16px;
 }
 
+.status-block {
+  margin-top: 16px;
+}
+
+.status-block .status {
+  margin-top: 0;
+}
+
 .status-hint {
   margin-top: 4px;
   font-size: 12px;
@@ -176,14 +215,7 @@
 }
 
 .result {
-  margin-top: 32px;
-}
-
-.result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  margin-top: 8px;
 }
 
 .result-toolbar {
@@ -202,10 +234,26 @@
   margin-left: auto;
 }
 
-/* Подпись меняется на «Скопировано ✓» / «Не удалось скопировать» — фиксируем
-   ширину, чтобы соседние кнопки не прыгали при смене состояния. */
-.copy-action {
-  min-width: 13rem;
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: var(--accent-ink);
+}
+
+.unreviewed-badge {
+  background: var(--warn-wash);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.unreviewed-badge:hover:not(:disabled) {
+  background: var(--warn-wash);
+  border-color: var(--warn);
+  color: var(--ink);
 }
 
 .markdown-preview {
@@ -266,8 +314,38 @@
   margin-top: 28px;
 }
 
-.replacement-section h3 {
-  margin-bottom: 8px;
+.replacement-section summary {
+  cursor: pointer;
+  font-weight: 680;
+  font-size: 1.02rem;
+  padding: 4px 0;
+  width: fit-content;
+}
+
+.replacement-csv {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 8px 0 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.replacement-csv p {
+  margin: 0;
+  flex: 1 1 24rem;
+}
+
+.type-dot {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
 }
 
 .replacement-table-wrap {
@@ -324,8 +402,8 @@
   max-height: calc(100dvh - 24px);
 }
 
-/* the CodeMirror mount wrapper (the unclassed div between toolbar and editor) */
-.editor-pane > div:not(.editor-toolbar) {
+/* the CodeMirror mount wrapper */
+.editor-pane > div {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -333,7 +411,7 @@
 }
 
 .entity-pane {
-  flex: 0 0 400px;
+  flex: 0 0 420px;
   min-width: 0;
   position: sticky;
   top: 12px;
@@ -354,6 +432,7 @@
   .editor-pane,
   .entity-pane {
     position: static;
+    align-self: stretch;
     max-height: none;
     flex: 1 1 auto;
   }
@@ -376,11 +455,10 @@
   outline: none;
 }
 
-.editor-toolbar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 8px;
+.editor-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--ink-3);
 }
 
 .cm-add-popup {
@@ -609,8 +687,9 @@
 
 .entity-row .entity-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px 6px;
   min-width: 0;
 }
 
@@ -623,9 +702,7 @@
 .entity-row .cell-placeholder {
   font-family: var(--font-mono);
   white-space: nowrap;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
   color: var(--ink-3);
   background: var(--accent-wash);
   border-radius: var(--radius-xs);
@@ -640,10 +717,9 @@
 }
 
 .entity-row select {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 140px;
+  flex: 0 0 auto;
   font-size: 12px;
+  padding: 2px 4px;
 }
 
 .entity-row .cell-value {
@@ -691,21 +767,6 @@
   color: var(--danger);
 }
 
-.entity-row .entity-merge {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  color: var(--ink-3);
-  cursor: pointer;
-  padding: 2px 6px;
-  display: inline-flex;
-  align-items: center;
-}
-
-.entity-row .entity-merge:hover {
-  color: var(--accent);
-}
-
 .entity-merge-edit {
   flex: 1 1 auto;
   min-width: 0;
@@ -727,22 +788,81 @@
 }
 
 .candidates-section {
-  margin-top: 18px;
+  margin: -14px -16px 16px;
+  padding: 14px 16px 6px;
+  background: var(--warn-wash);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 
 .candidates-section h3 {
-  margin-bottom: 6px;
-  font-size: 15px;
+  margin-bottom: 2px;
+  color: var(--warn);
 }
 
-.candidate-row .entity-accept {
+.candidates-hint {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.candidate-row:hover {
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.candidate-row:last-child {
+  border-bottom: none;
+}
+
+.candidate-row .type-dot {
+  margin: 6px 0 0;
+}
+
+.candidate-note {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.entity-row .entity-accept,
+.entity-row .entity-reject,
+.entity-row .entity-merge,
+.entity-row .entity-cancel {
   flex: 0 0 auto;
-  border: none;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.entity-row .entity-accept {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.entity-row .entity-accept:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: var(--accent-ink);
+}
+
+.entity-row .entity-reject:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-wash);
+}
+
+.entity-row .entity-merge,
+.entity-row .entity-cancel {
   background: transparent;
-  color: var(--pico-primary);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 6px;
+  border-color: transparent;
+  color: var(--ink-3);
+}
+
+.entity-row .entity-merge:hover:not(:disabled),
+.entity-row .entity-cancel:hover:not(:disabled) {
+  background: var(--sunk);
+  border-color: transparent;
+  color: var(--accent);
 }
 
 .collision-notice {
@@ -755,16 +875,114 @@
   font-size: 13px;
 }
 
+.anonymized-wrap {
+  margin-top: 12px;
+}
+
+.anonymized-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.anonymized-legend mark {
+  margin-right: 4px;
+}
+
 .anonymized-preview {
   white-space: pre-wrap;
   overflow-x: auto;
 }
 
+mark.anon-replaced {
+  background: var(--accent-wash);
+  color: var(--accent);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+mark.anon-unreplaced {
+  background: var(--warn-wash);
+  color: var(--ink);
+  text-decoration: underline wavy var(--warn);
+  text-underline-offset: 3px;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ── уведомления ── */
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 50;
+  width: max-content;
+  max-width: min(640px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  font-size: 14px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: toast-in .16s ease-out;
+}
+
+.toast-warn { border-left: 4px solid var(--warn); }
+.toast-error { border-left: 4px solid var(--danger); }
+
+.toast-text { flex: 1 1 auto; }
+
+.toast .toast-action {
+  flex: 0 0 auto;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--paper) 40%, transparent);
+  color: var(--paper);
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.toast .toast-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--paper) 14%, transparent);
+  border-color: var(--paper);
+  color: var(--paper);
+}
+
+.toast .toast-close {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: color-mix(in srgb, var(--paper) 70%, transparent);
+  padding: 2px 6px;
+}
+.toast .toast-close:hover:not(:disabled) {
+  background: transparent;
+  color: var(--paper);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
 /* Neutralize Pico's default spacing on form elements inside our flex rows */
 .result-actions button,
 .view-toggle button,
-.editor-toolbar button,
-.editor-toolbar select,
 .entity-row input,
 .entity-row select,
 .entity-row button {
@@ -840,9 +1058,10 @@
 }
 
 .ocr-option {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.8rem;
-  margin: 0.75rem 0;
+  margin: 0.75rem 0 0;
+  cursor: pointer;
 }

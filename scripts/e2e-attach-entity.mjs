@@ -1,7 +1,7 @@
 // Functional check for "attach selection to an existing entity". Seeds a doc
 // where a COMPANY ("Acme") is tracked as [COMPANY_1] at its first occurrence but
 // a second identical occurrence is untracked. Selects the untracked word, picks
-// [COMPANY_1] in the popup's "Куда" select, clicks ＋, and asserts the entity now
+// [COMPANY_1] in the popup's "Куда" select, clicks «Добавить», and asserts the entity now
 // has 2 occurrences under the SAME placeholder (no new [COMPANY_2]).
 //
 // Usage: node scripts/e2e-attach-entity.mjs [baseUrl]
@@ -81,9 +81,9 @@ try {
   // The target list is filtered by the selected type — set the popup's TYPE
   // select to COMPANY first so [COMPANY_1] appears as a target option.
   await popup.locator('select:not(.cm-add-popup-target)').first().selectOption('COMPANY')
-  // Pick [COMPANY_1] as the attach target, then click ＋.
+  // Pick [COMPANY_1] as the attach target, then click «Добавить».
   await page.locator('.cm-add-popup-target').selectOption(ENT_ID)
-  await popup.getByRole('button', { name: '＋' }).click()
+  await popup.getByRole('button', { name: 'Добавить', exact: true }).click()
   await page.waitForTimeout(400)
 
   // Postconditions: still ONE COMPANY row, still [COMPANY_1], count now 2, no [COMPANY_2].

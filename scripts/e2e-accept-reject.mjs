@@ -115,7 +115,7 @@ try {
     ok = (await expectCount(page, confirmedSelector, 1, 'confirmed rows after accept')) && ok
 
     // Reject the remaining candidate -> it should simply disappear.
-    await page.locator('.candidate-row .entity-delete').click()
+    await page.locator('.candidate-row .entity-reject').click()
     await page.waitForFunction(
       () => document.querySelectorAll('.candidate-row').length === 0,
       { timeout: 10000 },
