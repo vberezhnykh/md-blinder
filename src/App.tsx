@@ -360,6 +360,11 @@ function App() {
     setEntities((prev) => prev.map((e) => (e.id === id ? { ...e, anonymize: !e.anonymize } : e)))
   }, [setEntities])
 
+  const handleSetAnonymize = useCallback((ids: string[], anonymize: boolean) => {
+    const selected = new Set(ids)
+    setEntities((prev) => prev.map((e) => (selected.has(e.id) ? { ...e, anonymize } : e)))
+  }, [setEntities])
+
   const handleChangeType = useCallback((id: string, newType: EntityType) => {
     setEntities((prev) => changeEntityType(prev, id, newType))
   }, [setEntities])
@@ -611,6 +616,7 @@ function App() {
               onAcceptCandidate={handleAcceptCandidate}
               onRejectCandidate={handleRejectCandidate}
               onMergeEntity={handleMergeEntity}
+              onSetAnonymize={handleSetAnonymize}
               highlightedId={hoveredEntityId}
             />
           </div>

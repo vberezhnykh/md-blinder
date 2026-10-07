@@ -1,5 +1,6 @@
 import type { RawMatch } from './types'
 import { findImageExclusionRanges, maskImagesForDetection } from './imageSafety'
+import { detectPresidioIds, isZaIdNumber } from './presidioDetectors'
 
 export const ISO_COUNTRY_CODES = new Set([
   'AD', 'AE', 'AF', 'AG', 'AI', 'AL', 'AM', 'AO', 'AQ', 'AR', 'AS', 'AT', 'AU', 'AW', 'AX', 'AZ',
@@ -130,6 +131,8 @@ function detectCard(text: string): RawMatch[] {
     const digits = raw.replace(/[ -]/g, '')
     if (digits.length < 13 || digits.length > 19) continue
     if (!luhnCheck(digits)) continue
+    // ID-номер ЮАР тоже 13 цифр с Luhn; его забирает detectPresidioIds как ID_DOC.
+    if (isZaIdNumber(digits)) continue
     let end = m.index + raw.length
     let trimmed = raw
     while (trimmed.length && (trimmed[trimmed.length - 1] === ' ' || trimmed[trimmed.length - 1] === '-')) {
@@ -953,6 +956,9 @@ export function detectStructural(text: string): RawMatch[] {
     ...detectSnils(text),
     ...detectIdDocument(text),
     ...detectWebsite(text),
+    // До карт и телефонов: при одинаковом спане побеждает первый по порядку, а
+    // SSN 3-2-4 и UUID иначе распознавались как телефоны.
+    ...detectPresidioIds(text),
     ...detectCard(text),
     ...detectSwift(text),
     ...detectPhone(text),

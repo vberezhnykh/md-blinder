@@ -143,6 +143,40 @@ test('hovering an entity in the editor highlights its row in the entity list', a
   await expect(page.locator('.entity-row.is-highlighted')).toHaveCount(0)
 })
 
+test('found entities are grouped by type with a group toggle and collapse', async ({ page }) => {
+  const text = 'Alex met Bob at alice@example.test'
+  const at = (value: string) => ({ start: text.indexOf(value), end: text.indexOf(value) + value.length })
+  const entity = (id: string, type: Entity['type'], value: string, placeholder: string): Entity => ({
+    id, type, value, placeholder, positions: [at(value)], anonymize: true, manual: false,
+  })
+  await seed(page, [document('A', text, [
+    entity('p1', 'PERSON', 'Alex', '[PERSON_1]'),
+    entity('e1', 'EMAIL', 'alice@example.test', '[EMAIL_1]'),
+    entity('p2', 'PERSON', 'Bob', '[PERSON_2]'),
+  ])])
+  await open(page, 'A')
+  const groups = page.locator('.entity-group')
+  await expect(groups).toHaveCount(2)
+  await expect(groups.nth(0).locator('.entity-group-name')).toHaveText('PERSON')
+  await expect(groups.nth(0).locator('.entity-row')).toHaveCount(2)
+  await expect(groups.nth(1).locator('.entity-group-name')).toHaveText('EMAIL')
+
+  await groups.nth(0).locator('.entity-group-header input[type=checkbox]').uncheck()
+  await expect(groups.nth(0).locator('.entity-row input[type=checkbox]:checked')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('Alex met Bob at [EMAIL_1]')
+  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+  await groups.nth(0).locator('.entity-group-header input[type=checkbox]').check()
+  await expect(groups.nth(0).locator('.entity-row input[type=checkbox]:checked')).toHaveCount(2)
+
+  const toggle = groups.nth(0).locator('.entity-group-toggle')
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(groups.nth(0).locator('.entity-row')).toHaveCount(0)
+  await toggle.click()
+  await expect(groups.nth(0).locator('.entity-row')).toHaveCount(2)
+})
+
 test('the upload zone opens the file picker from the keyboard', async ({ page }) => {
   await page.goto('/')
   const chooser = page.waitForEvent('filechooser')

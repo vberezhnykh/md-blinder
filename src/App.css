@@ -664,6 +664,78 @@ button.primary:hover:not(:disabled) {
   background: var(--sunk);
 }
 
+/* Группа найденных данных одного типа. Заголовок прилипает к верху панели,
+   чтобы при прокрутке длинной группы было видно, к какому типу относятся строки. */
+.entity-group + .entity-group {
+  margin-top: 6px;
+}
+
+.entity-group-header {
+  position: sticky;
+  top: -14px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -16px;
+  padding: 7px 16px 7px 22px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.entity-group-header input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.entity-group-toggle {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 650;
+  text-align: left;
+}
+
+.entity-group-toggle:hover:not(:disabled) {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+}
+
+.entity-group-chevron {
+  width: 10px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.entity-group-toggle .type-dot {
+  margin-right: 0;
+}
+
+.entity-group-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.entity-group-count {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.entity-group-header.is-highlighted {
+  background: var(--accent-wash);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 /* Строка сущности, на которую наведена мышь в редакторе. */
 .entity-row.is-highlighted,
 .candidate-row.is-highlighted {
