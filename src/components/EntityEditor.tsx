@@ -6,7 +6,7 @@ import { Decoration, type DecorationSet, hoverTooltip, WidgetType } from '@codem
 import { StateEffect, StateField } from '@codemirror/state'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
-import { ALL_ENTITY_TYPES, ENTITY_TYPE_LABELS, type Entity, type EntityType } from '../lib/anonymize/types'
+import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 import { snapToWordBoundary } from '../lib/wordSnap'
 import {
   entityMetadataField,
@@ -315,7 +315,7 @@ function EntityEditor({
               create: () => {
                 const dom = document.createElement('div')
                 dom.className = 'cm-entity-tooltip'
-                dom.textContent = `${e.placeholder} · ${ENTITY_TYPE_LABELS[e.type]}${e.candidate ? ' · на проверке' : ''} · ${original}`
+                dom.textContent = `${e.placeholder} · ${e.type}${e.candidate ? ' · на проверке' : ''} · ${original}`
                 return { dom }
               },
             }
@@ -534,7 +534,7 @@ function EntityEditor({
             >
               {ALL_ENTITY_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {ENTITY_TYPE_LABELS[t]}
+                  {t}
                 </option>
               ))}
             </select>

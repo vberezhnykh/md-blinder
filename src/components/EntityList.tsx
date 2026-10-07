@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
-import { ALL_ENTITY_TYPES, ENTITY_TYPE_LABELS, type Entity, type EntityType } from '../lib/anonymize/types'
+import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
 interface EntityListProps {
   entities: Entity[]
@@ -36,7 +36,7 @@ function TypeSelect({ entity, onChangeType }: { entity: Entity; onChangeType: En
     >
       {ALL_ENTITY_TYPES.map((t) => (
         <option key={t} value={t}>
-          {ENTITY_TYPE_LABELS[t]}
+          {t}
         </option>
       ))}
     </select>

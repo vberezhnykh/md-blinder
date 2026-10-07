@@ -19,24 +19,6 @@ export const ALL_ENTITY_TYPES: EntityType[] = [
   'IBAN', 'SWIFT', 'ACCOUNT', 'CARD', 'EMAIL', 'PHONE', 'URL', 'OTHER',
 ]
 
-// Подписи типов для интерфейса. Коды остаются только внутри меток замены
-// ([PERSON_1]) и в CSV, где они служат идентификаторами.
-export const ENTITY_TYPE_LABELS: Record<EntityType, string> = {
-  PERSON: 'Человек',
-  COMPANY: 'Компания',
-  ADDRESS: 'Адрес',
-  REG_NUMBER: 'Рег. номер',
-  ID_DOC: 'Документ',
-  IBAN: 'IBAN',
-  SWIFT: 'SWIFT/BIC',
-  ACCOUNT: 'Счет',
-  CARD: 'Карта',
-  EMAIL: 'Email',
-  PHONE: 'Телефон',
-  URL: 'Сайт',
-  OTHER: 'Другое',
-}
-
 export interface RawMatch {
   type: EntityType
   value: string   // exact matched substring
