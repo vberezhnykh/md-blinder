@@ -411,7 +411,7 @@ button.primary:hover:not(:disabled) {
 }
 
 .entity-pane {
-  flex: 0 0 420px;
+  flex: 0 0 440px;
   min-width: 0;
   position: sticky;
   top: 12px;
@@ -664,10 +664,15 @@ button.primary:hover:not(:disabled) {
   background: var(--sunk);
 }
 
-/* Группа найденных данных одного типа. Заголовок прилипает к верху панели,
-   чтобы при прокрутке длинной группы было видно, к какому типу относятся строки. */
+/* Группа найденных данных одного типа. Заголовок окрашен тем же цветом, что и
+   подсветка этого типа в тексте, и прилипает к верху панели. Строки группы
+   сдвинуты вправо и связаны линией цвета типа — так видно, что они вложены. */
+.entity-group {
+  --group-color: var(--ent-OTHER);
+}
+
 .entity-group + .entity-group {
-  margin-top: 6px;
+  margin-top: 14px;
 }
 
 .entity-group-header {
@@ -676,11 +681,12 @@ button.primary:hover:not(:disabled) {
   z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 -16px;
-  padding: 7px 16px 7px 22px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  /* Цвет типа полупрозрачный: подкладываем фон панели, чтобы строки под
+     прилипшим заголовком не просвечивали. */
+  background: linear-gradient(var(--group-color), var(--group-color)), var(--surface);
 }
 
 .entity-group-header input[type='checkbox'] {
@@ -692,49 +698,86 @@ button.primary:hover:not(:disabled) {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   padding: 0;
   border: none;
   background: transparent;
   color: var(--ink);
-  font-weight: 650;
   text-align: left;
 }
 
 .entity-group-toggle:hover:not(:disabled) {
   border: none;
   background: transparent;
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .entity-group-chevron {
   width: 10px;
-  color: var(--ink-3);
-  font-size: 11px;
-}
-
-.entity-group-toggle .type-dot {
-  margin-right: 0;
+  color: var(--ink-2);
+  font-size: 12px;
 }
 
 .entity-group-name {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: .02em;
 }
 
 .entity-group-count {
   margin-left: auto;
-  color: var(--ink-3);
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 650;
+  line-height: 20px;
   font-variant-numeric: tabular-nums;
 }
 
 .entity-group-header.is-highlighted {
-  background: var(--accent-wash);
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
+
+.entity-group-items {
+  margin: 4px 0 0 16px;
+  padding-left: 8px;
+  border-left: 2px solid var(--group-color);
+}
+
+.entity-group-items .entity-row {
+  margin: 0;
+  padding: 7px 6px;
+}
+
+.entity-group-items .entity-row:last-child {
+  border-bottom: none;
+}
+
+.entity-group-items .entity-row .entity-merge {
+  padding: 2px 4px;
+}
+
+/* Внутри группы тип уже назван в заголовке — выбор типа в строке приглушен
+   и проявляется при наведении. */
+.entity-group-items .entity-row select {
+  /* Ширина по выбранному типу, а не по самому длинному варианту списка. */
+  field-sizing: content;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
+}
+
+.entity-group-items .entity-row:hover select,
+.entity-group-items .entity-row select:focus-visible {
+  border-color: var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 
 /* Строка сущности, на которую наведена мышь в редакторе. */
 .entity-row.is-highlighted,

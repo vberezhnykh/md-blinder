@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
@@ -215,7 +215,11 @@ function EntityList({
         const isCollapsed = collapsed.has(type)
         const groupHighlighted = isCollapsed && items.some((e) => e.id === highlightedId)
         return (
-          <section className="entity-group" key={type}>
+          <section
+            className="entity-group"
+            key={type}
+            style={{ '--group-color': `var(--ent-${type})` } as CSSProperties}
+          >
             <div
               className={`entity-group-header${groupHighlighted ? ' is-highlighted' : ''}`}
               data-group-type={type}
@@ -240,14 +244,13 @@ function EntityList({
                 })}
               >
                 <span className="entity-group-chevron" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
-                <TypeDot type={type} />
                 <span className="entity-group-name">{type}</span>
                 <span className="entity-group-count">
                   {active === items.length ? items.length : `${active} из ${items.length}`}
                 </span>
               </button>
             </div>
-            {!isCollapsed && items.map((entity) => {
+            {!isCollapsed && <div className="entity-group-items">{items.map((entity) => {
               const value = entityCurrentValue(sourceText, entity)
               const sameType = byType.get(entity.type)!
               const canMerge = sameType.length >= 2 && !!onMergeEntity
@@ -351,7 +354,7 @@ function EntityList({
                   )}
                 </div>
               )
-            })}
+            })}</div>}
           </section>
         )
       })}
