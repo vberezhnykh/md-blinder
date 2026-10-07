@@ -83,6 +83,7 @@ function App() {
   // процентов — тикающий таймер единственный признак, что ничего не зависло.
   const [elapsedSec, setElapsedSec] = useState(0)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
+  const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null)
   const [forceOcr, setForceOcr] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const toastKey = useRef(0)
@@ -597,6 +598,7 @@ function App() {
               onSelectedTypeChange={setSelectedType}
               reveal={reveal}
               onMergeEntity={handleMergeEntity}
+              onHoverEntity={setHoveredEntityId}
             />
             </Suspense>
             <EntityList
@@ -609,6 +611,7 @@ function App() {
               onAcceptCandidate={handleAcceptCandidate}
               onRejectCandidate={handleRejectCandidate}
               onMergeEntity={handleMergeEntity}
+              highlightedId={hoveredEntityId}
             />
           </div>
           <AnonymizedPreview

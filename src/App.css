@@ -676,6 +676,13 @@ button.primary:hover:not(:disabled) {
   background: var(--sunk);
 }
 
+/* Строка сущности, на которую наведена мышь в редакторе. */
+.entity-row.is-highlighted,
+.candidate-row.is-highlighted {
+  background: var(--accent-wash);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 /* значение и служебная строка — в колонку, чтобы значению доставалась вся ширина */
 .entity-row .entity-main {
   flex: 1 1 auto;

@@ -123,6 +123,26 @@ test('a deleted history document can be restored until the undo window closes', 
   await expect(page.locator('.history-row')).toContainText('Synthetic B.docx')
 })
 
+test('hovering an entity in the editor highlights its row in the entity list', async ({ page }) => {
+  const text = 'Sensitive Alex, contact alice@example.test'
+  const start = text.indexOf('alice@example.test')
+  const email: Entity = {
+    id: 'email', type: 'EMAIL', value: 'alice@example.test', placeholder: '[EMAIL_1]',
+    positions: [{ start, end: start + 18 }], anonymize: true, manual: false,
+  }
+  await seed(page, [document('A', text, [person(text), email])])
+  await open(page, 'A')
+  const rows = page.locator('.entity-row')
+  await page.locator('.cm-entity', { hasText: 'alice@example.test' }).hover()
+  await expect(page.locator('.entity-row.is-highlighted')).toHaveCount(1)
+  await expect(rows.filter({ hasText: '[EMAIL_1]' })).toHaveClass(/is-highlighted/)
+  await page.locator('.cm-entity', { hasText: 'Alex' }).hover()
+  await expect(rows.filter({ hasText: '[PERSON_1]' })).toHaveClass(/is-highlighted/)
+  await expect(rows.filter({ hasText: '[EMAIL_1]' })).not.toHaveClass(/is-highlighted/)
+  await page.locator('.compact-bar').hover()
+  await expect(page.locator('.entity-row.is-highlighted')).toHaveCount(0)
+})
+
 test('the upload zone opens the file picker from the keyboard', async ({ page }) => {
   await page.goto('/')
   const chooser = page.waitForEvent('filechooser')

@@ -26,6 +26,7 @@ interface EntityEditorProps {
   onSelectedTypeChange: (t: EntityType) => void
   reveal?: { from: number; to: number; nonce: number } | null
   onMergeEntity?: (sourceId: string, targetId: string) => void
+  onHoverEntity?: (entityId: string | null) => void
 }
 
 interface SelectionPopupState {
@@ -192,6 +193,7 @@ function EntityEditor({
   onSelectedTypeChange,
   reveal,
   onMergeEntity,
+  onHoverEntity,
 }: EntityEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -201,6 +203,8 @@ function EntityEditor({
   const onAddEntityRef = useRef(onAddEntity)
   const onAttachToEntityRef = useRef(onAttachToEntity)
   const onMergeEntityRef = useRef(onMergeEntity)
+  const onHoverEntityRef = useRef(onHoverEntity)
+  const hoveredEntityRef = useRef<string | null>(null)
   const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState | null>(null)
   const selectionPopupRef = useRef<SelectionPopupState | null>(null)
   const [activeSpan, setActiveSpan] = useState<ActiveSpan | null>(null)
@@ -216,6 +220,7 @@ function EntityEditor({
   onAddEntityRef.current = onAddEntity
   onAttachToEntityRef.current = onAttachToEntity
   onMergeEntityRef.current = onMergeEntity
+  onHoverEntityRef.current = onHoverEntity
   selectionPopupRef.current = selectionPopup
   activeSpanRef.current = activeSpan
   mergePopupRef.current = mergePopup
@@ -325,6 +330,44 @@ function EntityEditor({
       return null
     })
 
+    // Наведение на размеченный фрагмент подсвечивает его строку в панели справа.
+    // Сообщаем только смену сущности, чтобы не перерисовывать список на каждый пиксель.
+    const reportHover = (entityId: string | null) => {
+      if (hoveredEntityRef.current === entityId) return
+      hoveredEntityRef.current = entityId
+      onHoverEntityRef.current?.(entityId)
+    }
+    const hoverHandlers = EditorView.domEventHandlers({
+      mousemove(event, view) {
+        const target = event.target as HTMLElement | null
+        if (!target?.closest('.cm-entity')) {
+          reportHover(null)
+          return false
+        }
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+        if (pos == null) {
+          reportHover(null)
+          return false
+        }
+        // При вложенных сущностях выбираем самую узкую — ту, что видна сверху.
+        let best: { id: string; width: number } | null = null
+        for (const e of entitiesRef.current) {
+          if (e.dismissed) continue
+          for (const p of e.positions) {
+            if (pos >= p.start && pos <= p.end && (!best || p.end - p.start < best.width)) {
+              best = { id: e.id, width: p.end - p.start }
+            }
+          }
+        }
+        reportHover(best?.id ?? null)
+        return false
+      },
+      mouseleave() {
+        reportHover(null)
+        return false
+      },
+    })
+
     const dragHandlers = EditorView.domEventHandlers({
       mousedown(event, view) {
         const target = event.target as HTMLElement | null
@@ -427,6 +470,7 @@ function EntityEditor({
         activeSpanField,
         entityDecorationField,
         tooltip,
+        hoverHandlers,
         dragHandlers,
         updateListener,
         editorTheme,

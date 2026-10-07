@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
@@ -12,6 +12,7 @@ interface EntityListProps {
   onAcceptCandidate?: (id: string) => void
   onRejectCandidate?: (id: string) => void
   onMergeEntity?: (sourceId: string, targetId: string) => void
+  highlightedId?: string | null
 }
 
 function minStart(e: Entity): number {
@@ -73,7 +74,9 @@ function EntityList({
   onAcceptCandidate,
   onRejectCandidate,
   onMergeEntity,
+  highlightedId = null,
 }: EntityListProps) {
+  const paneRef = useRef<HTMLDivElement>(null)
   const [mergeSource, setMergeSource] = useState<string | null>(null)
   const [mergeTarget, setMergeTarget] = useState('')
   const { confirmed, candidates, byType } = useMemo(() => {
@@ -96,9 +99,49 @@ function EntityList({
     return { confirmed, candidates, byType }
   }, [entities])
 
+  // Панель прилипает к верху окна и прокручивается сама. Пока страница не
+  // прокручена, ее верх ниже панели действий, и с фиксированной высотой низ
+  // списка уходил за край окна. Подгоняем высоту так, чтобы панель
+  // заканчивалась у нижнего края окна и любая строка была досягаема.
+  useEffect(() => {
+    const pane = paneRef.current
+    if (!pane) return
+    const fit = () => {
+      if (getComputedStyle(pane).position !== 'sticky') {
+        pane.style.maxHeight = ''
+        return
+      }
+      const top = Math.max(pane.getBoundingClientRect().top, 12)
+      pane.style.maxHeight = `${Math.max(240, window.innerHeight - top - 12)}px`
+    }
+    fit()
+    window.addEventListener('scroll', fit, { passive: true })
+    window.addEventListener('resize', fit)
+    return () => {
+      window.removeEventListener('scroll', fit)
+      window.removeEventListener('resize', fit)
+    }
+  }, [])
+
+  // Прокручиваем только панель и только если строка не видна: scrollIntoView
+  // сдвинул бы всю страницу вместе с редактором под курсором. Видимой считается
+  // часть панели внутри окна — пока страница не прокручена, низ панели за экраном.
+  useEffect(() => {
+    const pane = paneRef.current
+    if (!pane || !highlightedId) return
+    const row = pane.querySelector<HTMLElement>(`[data-entity-id="${CSS.escape(highlightedId)}"]`)
+    if (!row) return
+    const paneBox = pane.getBoundingClientRect()
+    const top = Math.max(paneBox.top, 0)
+    const bottom = Math.min(paneBox.bottom, window.innerHeight)
+    const rowBox = row.getBoundingClientRect()
+    if (rowBox.top < top) pane.scrollTop -= top - rowBox.top + 8
+    else if (rowBox.bottom > bottom) pane.scrollTop += rowBox.bottom - bottom + 8
+  }, [highlightedId])
+
   if (!confirmed.length && !candidates.length) {
     return (
-      <div className="entity-pane">
+      <div className="entity-pane" ref={paneRef}>
         <h3>Найденные данные</h3>
         <p className="text-muted">Ничего не найдено. Выделите текст в редакторе, чтобы добавить замену вручную.</p>
       </div>
@@ -106,7 +149,7 @@ function EntityList({
   }
 
   return (
-    <div className="entity-pane">
+    <div className="entity-pane" ref={paneRef}>
       {/* Кандидаты идут первыми: они не заменяются, пока их не принять, и при
           длинном списке внизу их легко не заметить. */}
       {candidates.length > 0 && (
@@ -116,7 +159,11 @@ function EntityList({
           {candidates.map((entity) => {
             const value = entityCurrentValue(sourceText, entity)
             return (
-              <div className="entity-row candidate-row" key={entity.id}>
+              <div
+                className={`entity-row candidate-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
+                key={entity.id}
+                data-entity-id={entity.id}
+              >
                 <TypeDot type={entity.type} />
                 <div className="entity-main">
                   <EntityValue entity={entity} value={value} onSelect={onSelect} />
@@ -154,7 +201,11 @@ function EntityList({
         const canMerge = sameType.length >= 2 && !!onMergeEntity
         const isMerging = mergeSource === entity.id
         return (
-          <div className="entity-row" key={entity.id}>
+          <div
+            className={`entity-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
+            key={entity.id}
+            data-entity-id={entity.id}
+          >
             <input
               type="checkbox"
               checked={entity.anonymize}
