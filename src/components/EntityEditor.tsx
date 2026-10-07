@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
-import { Decoration, type DecorationSet, hoverTooltip, WidgetType } from '@codemirror/view'
+import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
 import { StateEffect, StateField } from '@codemirror/state'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
@@ -308,28 +308,6 @@ function EntityEditor({
       }
     })
 
-    const tooltip = hoverTooltip((_view, pos) => {
-      for (const e of entitiesRef.current) {
-        for (const p of e.positions) {
-          if (pos >= p.start && pos <= p.end) {
-            const original = _view.state.doc.sliceString(p.start, p.end)
-            return {
-              pos: p.start,
-              end: p.end,
-              above: true,
-              create: () => {
-                const dom = document.createElement('div')
-                dom.className = 'cm-entity-tooltip'
-                dom.textContent = `${e.placeholder} · ${e.type}${e.candidate ? ' · на проверке' : ''} · ${original}`
-                return { dom }
-              },
-            }
-          }
-        }
-      }
-      return null
-    })
-
     // Наведение на размеченный фрагмент подсвечивает его строку в панели справа.
     // Сообщаем только смену сущности, чтобы не перерисовывать список на каждый пиксель.
     const reportHover = (entityId: string | null) => {
@@ -469,7 +447,6 @@ function EntityEditor({
         entityMetadataHistory,
         activeSpanField,
         entityDecorationField,
-        tooltip,
         hoverHandlers,
         dragHandlers,
         updateListener,
