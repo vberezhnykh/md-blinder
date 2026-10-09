@@ -63,6 +63,11 @@ async function downloadedText(download: Download) {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+async function copyFromExportMenu(page: Page) {
+  await page.getByRole('button', { name: 'Другие варианты выдачи', exact: true }).click()
+  await page.getByRole('button', { name: /^Копировать текст/ }).click()
+}
+
 async function history(page: Page) {
   await page.getByRole('button', { name: 'История', exact: true }).click()
   await page.getByRole('button', { name: 'Все документы', exact: true }).click()
@@ -93,7 +98,7 @@ test('export and copy use the current anonymization immediately and report unrev
   await expect(page.locator('.anonymized-preview mark.anon-unreplaced')).toHaveText('alice@example.test')
   await expect(page.locator('.anonymized-preview mark.anon-replaced')).toHaveText('[PERSON_1]')
 
-  await page.getByRole('button', { name: 'Копировать текст', exact: true }).click()
+  await copyFromExportMenu(page)
   await expect(page.locator('.toast')).toContainText(/Текст скопирован.*Не проверено: 1 кандидат/s)
   await page.locator('.toast').getByRole('button', { name: 'Показать', exact: true }).click()
   await expect(page.locator('.editor-layout')).toBeVisible()
@@ -102,6 +107,7 @@ test('export and copy use the current anonymization immediately and report unrev
   await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await acceptedDownload)).toBe('Sensitive [PERSON_1], contact [EMAIL_1]')
   await expect(page.getByRole('button', { name: /Не проверено/ })).toHaveCount(0)
+  await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
 })
 
 test('a deleted history document can be restored until the undo window closes', async ({ page }) => {
@@ -333,7 +339,7 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   await open(page, 'images')
   await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
   await expect(page.locator('.anonymized-preview')).toHaveText(expected)
-  await page.getByRole('button', { name: 'Копировать текст', exact: true }).click()
+  await copyFromExportMenu(page)
   await expect(page.locator('.toast')).toContainText('Текст скопирован')
   // The native Windows clipboard converts line endings to CRLF.
   const copied = await page.evaluate(() => navigator.clipboard.readText())
@@ -376,4 +382,33 @@ test('the top bar menus open documents and hold the OCR option for the next file
   await expect(page.locator('.menu-panel')).toHaveCount(0)
   await newFileButton.click()
   await expect(page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })).toBeChecked()
+})
+
+test('the status strip follows the review and the export menu holds the replacement table', async ({ page }) => {
+  const text = 'Sensitive Alex, contact alice@example.test'
+  const start = text.indexOf('alice@example.test')
+  const candidate: Entity = {
+    id: 'email-candidate', type: 'EMAIL', value: 'alice@example.test', placeholder: '[EMAIL_1]',
+    positions: [{ start, end: start + 18 }], anonymize: false, manual: false, candidate: true,
+  }
+  await seed(page, [document('A', text, [person(text), candidate])])
+  await open(page, 'A')
+  await expect(page.locator('.replacement-section')).toHaveCount(0)
+  await expect(page.locator('.status-steps [aria-current="step"] .status-step-label')).toHaveText('Проверка')
+  await expect(page.locator('.status-summary')).toHaveText('Заменено 1 значение в 1 месте')
+
+  await page.getByRole('button', { name: 'Другие варианты выдачи', exact: true }).click()
+  const csvItem = page.getByRole('button', { name: /^Таблица замен \(\.csv\)/ })
+  await expect(csvItem).toContainText('исходные данные')
+  const csvDownload = page.waitForEvent('download')
+  await csvItem.click()
+  const csv = await csvDownload
+  expect(csv.suggestedFilename()).toBe('Synthetic A-replacements.csv')
+  expect(await downloadedText(csv)).toContain('Alex')
+  await expect(page.locator('.menu-panel')).toHaveCount(0)
+
+  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
+  await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
+  await expect(page.locator('.status-steps [aria-current="step"] .status-step-label')).toHaveText('Выдача')
+  await expect(page.locator('.status-summary')).toHaveText('Заменено 2 значения в 2 местах')
 })

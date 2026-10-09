@@ -343,12 +343,120 @@
   margin-bottom: 6px;
 }
 
-.result-actions {
+/* ── строка статуса (StatusStrip.tsx) ── */
+.status-strip {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+}
+
+.status-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+
+.status-step + .status-step::before {
+  content: "";
+  width: 24px;
+  height: 1px;
+  margin-right: 2px;
+  background: var(--line-2);
+}
+
+.status-step-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-step.is-done .status-step-mark { background: var(--ready); border-color: var(--ready); color: #fff; }
+.status-step.is-active .status-step-mark { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.status-step.is-active { color: var(--ink); font-weight: 600; }
+
+.status-info {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.status-chip.is-pending { background: var(--pending-wash); border-color: var(--pending-line); color: var(--pending); }
+.status-chip.is-pending:hover:not(:disabled) { background: var(--pending-wash); border-color: var(--pending); color: var(--ink); }
+.status-chip.is-ready { background: var(--ready-wash); border-color: #b9dcc6; color: var(--ready); }
+
+.status-summary {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.split-button {
+  display: flex;
   margin-left: auto;
 }
+
+.split-button .split-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.split-button .split-toggle {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, .35);
+  padding-left: 9px;
+  padding-right: 9px;
+}
+
+/* Открытое меню выдачи не перекрашивает основную кнопку в светлый цвет. */
+.split-button .split-toggle[aria-expanded="true"] {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: var(--accent-ink);
+}
+
+.menu-item.menu-item-icon {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.menu-item-icon > .icon { margin-top: 3px; flex: none; color: var(--ink-2); }
+.menu-item.is-sensitive > .icon,
+.menu-item.is-sensitive .menu-item-hint { color: var(--warn); }
 
 button.primary {
   background: var(--accent);
@@ -359,17 +467,6 @@ button.primary:hover:not(:disabled) {
   background: var(--accent-2);
   border-color: var(--accent-2);
   color: var(--accent-ink);
-}
-
-.unreviewed-badge {
-  background: var(--warn-wash);
-  border-color: var(--warn);
-  color: var(--warn);
-}
-.unreviewed-badge:hover:not(:disabled) {
-  background: var(--warn-wash);
-  border-color: var(--warn);
-  color: var(--ink);
 }
 
 .markdown-preview {
@@ -426,33 +523,6 @@ button.primary:hover:not(:disabled) {
   color: var(--pico-primary-inverse);
 }
 
-.replacement-section {
-  margin-top: 28px;
-}
-
-.replacement-section summary {
-  cursor: pointer;
-  font-weight: 680;
-  font-size: 1.02rem;
-  padding: 4px 0;
-  width: fit-content;
-}
-
-.replacement-csv {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin: 8px 0 12px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-
-.replacement-csv p {
-  margin: 0;
-  flex: 1 1 24rem;
-}
-
 .type-dot {
   display: inline-block;
   flex: 0 0 auto;
@@ -462,39 +532,6 @@ button.primary:hover:not(:disabled) {
   margin-right: 6px;
   vertical-align: 1px;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
-}
-
-.replacement-table-wrap {
-  overflow-x: auto;
-}
-
-.replacement-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.replacement-table th,
-.replacement-table td {
-  border: 1px solid var(--pico-muted-border-color);
-  padding: 6px 10px;
-  text-align: left;
-}
-
-.replacement-table th {
-  font-weight: 600;
-}
-
-.replacement-table .cell-placeholder {
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-
-.replacement-table .cell-value {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .editor-layout {
@@ -1195,7 +1232,6 @@ mark.anon-unreplaced {
 }
 
 /* Neutralize Pico's default spacing on form elements inside our flex rows */
-.result-actions button,
 .view-toggle button,
 .entity-row input,
 .entity-row select,

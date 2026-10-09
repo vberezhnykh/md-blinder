@@ -14,12 +14,12 @@ import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory
 import { useDocumentSession } from './hooks/useDocumentSession'
 import { useAnalysisJob } from './hooks/useAnalysisJob'
 import { useHistoryStore } from './hooks/useHistoryStore'
-import ReplacementTable from './components/ReplacementTable'
 import EntityList from './components/EntityList'
 import HistoryPanel from './components/HistoryPanel'
 import AnonymizedPreview from './components/AnonymizedPreview'
 import Toast, { type ToastState } from './components/Toast'
 import TopBar from './components/TopBar'
+import StatusStrip from './components/StatusStrip'
 import './App.css'
 
 const EntityEditor = lazy(() => import('./components/EntityEditor'))
@@ -420,7 +420,10 @@ function App() {
   }, [])
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
-  const activeCount = entities.filter((e) => e.anonymize).length
+  const replaced = useMemo(() => {
+    const active = entities.filter((e) => e.anonymize)
+    return { values: active.length, places: active.reduce((sum, e) => sum + e.positions.length, 0) }
+  }, [entities])
   const visibleHistory = useMemo(
     () => (pendingDeleteId ? history.filter((d) => d.id !== pendingDeleteId) : history),
     [history, pendingDeleteId],
@@ -534,6 +537,16 @@ function App() {
 
       {snapshot.doc && (
         <section className="result" hidden={!hasResult} aria-label="Документ">
+          <StatusStrip
+            unreviewedCount={unreviewedCount}
+            replacedValues={replaced.values}
+            replacedPlaces={replaced.places}
+            exportFileName={`${baseName(fileName)}.md`}
+            onShowCandidates={showCandidates}
+            onExport={handleExport}
+            onCopy={() => void handleCopy()}
+            onExportCsv={handleExportCsv}
+          />
           {nerNotice && (
             <p className="ner-notice">
               Модель распознавания имен, компаний и адресов не загрузилась (при первом запуске нужен
@@ -553,8 +566,8 @@ function App() {
             </p>
           )}
 
-          <div className="result-toolbar">
-            {showViewToggle && (
+          {showViewToggle && (
+            <div className="result-toolbar">
               <div className="view-toggle" role="group" aria-label="Вид">
                 <button
                   type="button"
@@ -573,21 +586,8 @@ function App() {
                   Анонимизированный
                 </button>
               </div>
-            )}
-            <div className="result-actions">
-              {unreviewedCount > 0 && (
-                <button type="button" className="unreviewed-badge" onClick={showCandidates}>
-                  Не проверено: {plural(unreviewedCount, ['кандидат', 'кандидата', 'кандидатов'])}
-                </button>
-              )}
-              <button type="button" onClick={() => void handleCopy()}>
-                Копировать текст
-              </button>
-              <button type="button" className="primary" onClick={handleExport}>
-                Экспортировать .md
-              </button>
             </div>
-          </div>
+          )}
 
           <div className="editor-layout" hidden={view !== 'editor'}>
             <Suspense fallback={<p role="status">Загрузка редактора…</p>}>
@@ -627,21 +627,6 @@ function App() {
             hidden={view !== 'anonymized'}
           />
 
-          {entities.length > 0 && (
-            <details className="replacement-section">
-              <summary>Таблица замен ({activeCount})</summary>
-              <div className="replacement-csv">
-                <p>
-                  Таблица содержит исходные данные и позволяет восстановить текст. Не передавайте ее
-                  вместе с обезличенным документом.
-                </p>
-                <button type="button" onClick={handleExportCsv}>
-                  Скачать таблицу замен (.csv)
-                </button>
-              </div>
-              <ReplacementTable entities={entities} sourceText={sourceText} />
-            </details>
-          )}
         </section>
       )}
 

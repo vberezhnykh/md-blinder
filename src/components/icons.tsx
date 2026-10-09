@@ -44,6 +44,18 @@ export const AlertIcon = ({ size = 14 }: IconProps) => (
   <Icon size={size} strokeWidth={2.2}><circle cx="12" cy="12" r="9" /><path d="M12 8v4" /><path d="M12 16h.01" /></Icon>
 )
 
+export const DownloadIcon = ({ size }: IconProps) => (
+  <Icon size={size}><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></Icon>
+)
+
+export const CopyIcon = ({ size }: IconProps) => (
+  <Icon size={size}><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></Icon>
+)
+
+export const TableIcon = ({ size }: IconProps) => (
+  <Icon size={size}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M10 4v16" /></Icon>
+)
+
 // Знак приложения: три полосы разной длины, как зачерненные строки.
 export function BlinderMark() {
   return (
