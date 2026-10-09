@@ -471,19 +471,17 @@ button.primary:hover:not(:disabled) {
 
 .markdown-preview {
   width: 100%;
-  min-height: 420px;
-  margin-top: 12px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 16px;
+  min-height: 220px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.7;
+  padding: 18px 20px;
   box-sizing: border-box;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   color: var(--ink);
-  resize: vertical;
 }
 
 .ner-notice,
@@ -541,6 +539,41 @@ button.primary:hover:not(:disabled) {
   align-items: flex-start;
 }
 
+/* Исходник и результат: рядом в широком окне, иначе виден один из них. */
+.workspace-docs {
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.workspace-docs > .editor-pane,
+.workspace-docs > .anonymized-wrap {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.editor-layout.is-side-by-side .entity-pane {
+  flex-basis: 360px;
+}
+
+.result-toolbar-hint {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+.side-by-side-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.side-by-side-option input { margin: 0; }
+
 /* Editor gets the lion's share of the width; the entity pane is a fixed,
    narrower column. Both panes stick to the top and cap at the viewport height,
    scrolling internally, so neither runs off-screen or bloats the page. */
@@ -579,8 +612,14 @@ button.primary:hover:not(:disabled) {
 }
 
 @media (max-width: 900px) {
-  .editor-layout {
+  .editor-layout,
+  .workspace-docs {
     flex-direction: column;
+  }
+  .workspace-docs > .editor-pane,
+  .workspace-docs > .anonymized-wrap {
+    flex: 1 1 auto;
+    align-self: stretch;
   }
   .editor-pane,
   .entity-pane {
@@ -608,8 +647,22 @@ button.primary:hover:not(:disabled) {
   outline: none;
 }
 
-.editor-hint {
-  margin: 0 0 6px;
+/* Заголовок колонки: «Исходник» или «Результат» и подсказка либо легенда. */
+.pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin: 0 2px 6px;
+}
+
+.pane-title {
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.pane-hint {
   font-size: 12px;
   color: var(--ink-3);
 }
@@ -820,7 +873,9 @@ button.primary:hover:not(:disabled) {
   background: none;
   color: var(--ink-3);
   font-size: 14px;
+  white-space: nowrap;
 }
+.editor-layout.is-side-by-side .side-tab { gap: 6px; font-size: 13.5px; }
 .side-tab:hover:not(:disabled) { background: none; border-color: transparent; border-bottom-color: var(--line-2); color: var(--ink); }
 .side-tab.is-selected,
 .side-tab.is-selected:hover:not(:disabled) { border-bottom-color: var(--accent); color: var(--ink); font-weight: 650; }
@@ -1294,14 +1349,17 @@ button.primary:hover:not(:disabled) {
 }
 
 .anonymized-wrap {
-  margin-top: 12px;
+  position: sticky;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 24px);
 }
 
 .anonymized-legend {
   display: flex;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
-  margin: 0;
   font-size: 12px;
   color: var(--ink-3);
 }
@@ -1311,24 +1369,45 @@ button.primary:hover:not(:disabled) {
 }
 
 .anonymized-preview {
+  flex: 1 1 auto;
   white-space: pre-wrap;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
+  overflow: auto;
 }
 
+/* Строки Markdown-таблиц — моноширинным шрифтом, как в редакторе. */
+.preview-line.is-table {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* Метка замены — плашка цензуры. */
 mark.anon-replaced {
-  background: var(--accent-wash);
-  color: var(--accent);
+  padding: 1px 6px;
   border-radius: 3px;
-  padding: 0 1px;
+  background: var(--redact-bg);
+  color: var(--redact-ink);
+  font-family: var(--font-mono);
+  font-size: .78em;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
+/* Фрагмент, оставшийся без замены: непроверенный кандидат или выключенная замена. */
 mark.anon-unreplaced {
-  background: var(--warn-wash);
-  color: var(--ink);
-  text-decoration: underline wavy var(--warn);
-  text-underline-offset: 3px;
-  border-radius: 3px;
   padding: 0 1px;
+  border-radius: 2px;
+  background: var(--pending-wash);
+  color: var(--ink);
+  text-decoration: underline wavy var(--pending-line);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+
+mark.anon-replaced.is-focused,
+mark.anon-unreplaced.is-focused {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── уведомления ── */

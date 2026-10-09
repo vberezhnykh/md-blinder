@@ -14,6 +14,8 @@ import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory
 import { useDocumentSession } from './hooks/useDocumentSession'
 import { useAnalysisJob } from './hooks/useAnalysisJob'
 import { useHistoryStore } from './hooks/useHistoryStore'
+import { useMediaQuery } from './hooks/useMediaQuery'
+import { useStoredFlag } from './hooks/useStoredFlag'
 import EntityList, { type SideTab } from './components/EntityList'
 import CandidateReview from './components/CandidateReview'
 import HistoryPanel from './components/HistoryPanel'
@@ -74,7 +76,14 @@ function App() {
   const currentDocId = snapshot.doc?.id ?? null
   const [nerNotice, setNerNotice] = useState(false)
   const [hasResult, setHasResult] = useState(false)
-  const [view, setView] = useState<'editor' | 'anonymized'>('editor')
+  // Вид в одной колонке: исходник или результат. В широком окне они стоят рядом.
+  const [view, setView] = useState<'source' | 'result'>('source')
+  const wideWindow = useMediaQuery('(min-width: 1280px)')
+  const [preferSideBySide, setPreferSideBySide] = useStoredFlag('md-blinder:result-side-by-side', true)
+  const sideBySide = wideWindow && preferSideBySide
+  // Смещение в исходнике, к которому прокрутить результат: выбранное значение
+  // или текущий кандидат.
+  const [resultFocus, setResultFocus] = useState<{ pos: number; nonce: number } | null>(null)
   const [selectedType, setSelectedType] = useState<EntityType>('PERSON')
   const [fileName, setFileName] = useState('')
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
@@ -140,7 +149,7 @@ function App() {
       }
       setFileName(meta.name)
       setNerNotice(false)
-      setView('editor')
+      setView('source')
       setSideTab(null)
       setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
       setHasResult(true)
@@ -244,7 +253,7 @@ function App() {
     setElapsedSec(0)
     setFileName(file.name)
     setNerNotice(false)
-    setView('editor')
+    setView('source')
     setHasResult(false)
 
     try {
@@ -296,7 +305,7 @@ function App() {
       replace({ id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now,
         updatedAt: now, sourceText: md, entities: [...result.entities, ...related] }, true)
       setNerNotice(nerFailed)
-      setView('editor')
+      setView('source')
       setSideTab(null)
       setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
       setStatus('idle')
@@ -334,7 +343,7 @@ function App() {
   }
 
   const showCandidates = useCallback(() => {
-    setView('editor')
+    setView('source')
     setSideTab('review')
   }, [])
 
@@ -343,7 +352,9 @@ function App() {
   const activateCandidate = useCallback((id: string | null) => {
     setActiveCandidate((prev) => ({ id, nonce: prev.nonce + 1 }))
     setSideTab('review')
-  }, [])
+    const pos = id ? snapshotRef.current.doc?.entities.find((e) => e.id === id)?.positions[0]?.start : undefined
+    if (pos !== undefined) setResultFocus((prev) => ({ pos, nonce: (prev?.nonce ?? 0) + 1 }))
+  }, [snapshotRef])
 
   // Копирование и экспорт мгновенные: текст берется из текущей разметки без
   // повторного прогона NER. Непроверенные кандидаты не блокируют действие —
@@ -441,6 +452,7 @@ function App() {
     const p = entity.positions[0]
     if (!p) return
     setReveal({ from: p.start, to: p.end, nonce: Date.now() })
+    setResultFocus((prev) => ({ pos: p.start, nonce: (prev?.nonce ?? 0) + 1 }))
   }, [])
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
@@ -595,33 +607,48 @@ function App() {
             </p>
           )}
 
-          {showViewToggle && (
+          {(wideWindow || showViewToggle) && (
             <div className="result-toolbar">
-              <div className="view-toggle" role="group" aria-label="Вид">
-                <button
-                  type="button"
-                  className={view === 'editor' ? 'active' : ''}
-                  aria-pressed={view === 'editor'}
-                  onClick={() => setView('editor')}
-                >
-                  Редактор
-                </button>
-                <button
-                  type="button"
-                  className={view === 'anonymized' ? 'active' : ''}
-                  aria-pressed={view === 'anonymized'}
-                  onClick={() => setView('anonymized')}
-                >
-                  Анонимизированный
-                </button>
-              </div>
+              {!sideBySide && showViewToggle && (
+                <div className="view-toggle" role="group" aria-label="Вид">
+                  <button
+                    type="button"
+                    className={view === 'source' ? 'active' : ''}
+                    aria-pressed={view === 'source'}
+                    onClick={() => setView('source')}
+                  >
+                    Исходник
+                  </button>
+                  <button
+                    type="button"
+                    className={view === 'result' ? 'active' : ''}
+                    aria-pressed={view === 'result'}
+                    onClick={() => setView('result')}
+                  >
+                    Результат
+                  </button>
+                </div>
+              )}
+              {sideBySide && <span className="result-toolbar-hint">Правки в исходнике сразу видны в результате справа</span>}
+              {wideWindow && (
+                <label className="side-by-side-option">
+                  <input
+                    type="checkbox"
+                    checked={preferSideBySide}
+                    onChange={(event) => setPreferSideBySide(event.target.checked)}
+                  />
+                  Результат рядом
+                </label>
+              )}
             </div>
           )}
 
-          <div className="editor-layout" hidden={view !== 'editor'}>
+          <div className={`editor-layout${sideBySide ? ' is-side-by-side' : ''}`}>
+            <div className="workspace-docs">
             <Suspense fallback={<p role="status">Загрузка редактора…</p>}>
             <EntityEditor
               key={currentDocId}
+              hidden={!sideBySide && view !== 'source'}
               value={sourceText}
               entities={entities}
               onChange={handleEditorChange}
@@ -635,6 +662,15 @@ function App() {
               currentCandidate={{ id: sidePanelTab === 'review' ? currentCandidateId : null, nonce: activeCandidate.nonce }}
             />
             </Suspense>
+            <AnonymizedPreview
+              text={anonymizedText}
+              sourceText={sourceText}
+              segments={anonymized.segments}
+              entities={entities}
+              hidden={!sideBySide && view !== 'result'}
+              focus={resultFocus}
+            />
+            </div>
             <EntityList
               entities={entities}
               sourceText={sourceText}
@@ -664,13 +700,6 @@ function App() {
               )}
             />
           </div>
-          <AnonymizedPreview
-            text={anonymizedText}
-            sourceText={sourceText}
-            segments={anonymized.segments}
-            entities={entities}
-            hidden={view !== 'anonymized'}
-          />
 
         </section>
       )}

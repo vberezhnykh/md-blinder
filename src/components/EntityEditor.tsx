@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
-import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
-import { Annotation, StateEffect, StateField } from '@codemirror/state'
+import { Decoration, type DecorationSet, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view'
+import { Annotation, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
@@ -31,6 +31,7 @@ interface EntityEditorProps {
   // Смена nonce прокручивает редактор к кандидату без выделения и без фокуса,
   // чтобы фокус оставался в карточке проверки.
   currentCandidate?: { id: string | null; nonce: number }
+  hidden?: boolean
 }
 
 interface SelectionPopupState {
@@ -158,23 +159,59 @@ const entityDecorationField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
+// Строки Markdown-таблиц набираются моноширинным шрифтом, чтобы столбцы
+// оставались ровными; остальной текст договора — шрифтом с засечками.
+const tableLineDecoration = Decoration.line({ class: 'cm-table-line' })
+const TABLE_LINE = /^\s*\|/
+
+function buildTableLines(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  let lastLine = -1
+  for (const { from, to } of view.visibleRanges) {
+    for (let pos = from; pos <= to;) {
+      const line = view.state.doc.lineAt(pos)
+      if (line.number !== lastLine && TABLE_LINE.test(line.text)) builder.add(line.from, line.from, tableLineDecoration)
+      lastLine = line.number
+      pos = line.to + 1
+    }
+  }
+  return builder.finish()
+}
+
+const tableLines = ViewPlugin.fromClass(class {
+  decorations: DecorationSet
+  constructor(view: EditorView) {
+    this.decorations = buildTableLines(view)
+  }
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.viewportChanged) this.decorations = buildTableLines(update.view)
+  }
+}, { decorations: (plugin) => plugin.decorations })
+
 // Цвета и шрифт берутся из токенов приложения, чтобы редактор не расходился
 // с остальным интерфейсом.
 const editorTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
     color: 'var(--ink)',
-    fontSize: '13px',
+    fontSize: '15px',
   },
   '.cm-content': {
-    fontFamily: 'var(--font-mono)',
-    padding: '16px',
+    fontFamily: 'var(--font-serif)',
+    lineHeight: '1.7',
+    padding: '18px 20px',
     caretColor: 'var(--ink)',
+  },
+  '.cm-table-line': {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12.5px',
   },
   '.cm-scroller': {
     overflow: 'auto',
   },
   '.cm-gutters': {
+    fontFamily: 'var(--font-mono)',
+    fontSize: '12px',
     backgroundColor: 'var(--sunk)',
     color: 'var(--ink-3)',
     borderRight: '1px solid var(--line)',
@@ -216,6 +253,7 @@ function EntityEditor({
   onMergeEntity,
   onHoverEntity,
   currentCandidate,
+  hidden = false,
 }: EntityEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -465,6 +503,7 @@ function EntityEditor({
         basicSetup,
         markdown(),
         syntaxHighlighting(markdownHighlight),
+        tableLines,
         EditorView.lineWrapping,
         entityMetadataField.init(() => entitiesRef.current),
         entityMetadataHistory,
@@ -575,8 +614,11 @@ function EntityEditor({
   const activeMergeType = mergePopup ? entities.find((x) => x.id === mergePopup.entityId)?.type : undefined
 
   return (
-    <div className="editor-pane">
-      <p className="editor-hint">Выделите текст, чтобы добавить его в замены.</p>
+    <div className="editor-pane" hidden={hidden}>
+      <div className="pane-head">
+        <span className="pane-title">Исходник</span>
+        <span className="pane-hint">Выделите текст, чтобы добавить его в замены</span>
+      </div>
       <div ref={mountRef} />
       {selectionPopup &&
         createPortal(

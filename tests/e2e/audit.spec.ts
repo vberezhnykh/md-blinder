@@ -63,6 +63,20 @@ async function downloadedText(download: Download) {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+// In a wide window the source and the result stand side by side; otherwise the
+// view toggle switches between them.
+async function showResult(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Результат', exact: true })
+  if (await toggle.isVisible()) await toggle.click()
+  await expect(page.locator('.anonymized-preview')).toBeVisible()
+}
+
+async function showSource(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Исходник', exact: true })
+  if (await toggle.isVisible()) await toggle.click()
+  await expect(page.locator('.cm-content')).toBeVisible()
+}
+
 async function acceptCurrentCandidate(page: Page) {
   await page.locator('.candidate-card').getByRole('button', { name: /^Принять/ }).first().click()
 }
@@ -99,7 +113,7 @@ test('export and copy use the current anonymization immediately and report unrev
   await expect(page.locator('.toast')).toContainText('Не проверено: 1 кандидат')
   await expect(page.getByRole('button', { name: 'Не проверено: 1 кандидат', exact: true })).toBeVisible()
   // The candidate stays visible as unreplaced in the anonymized view.
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview mark.anon-unreplaced')).toHaveText('alice@example.test')
   await expect(page.locator('.anonymized-preview mark.anon-replaced')).toHaveText('[PERSON_1]')
 
@@ -176,9 +190,9 @@ test('found entities are grouped by type with a group toggle and collapse', asyn
 
   await groups.nth(0).locator('.entity-group-header input[type=checkbox]').uncheck()
   await expect(groups.nth(0).locator('.entity-row input[type=checkbox]:checked')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Alex met Bob at [EMAIL_1]')
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+  await showSource(page)
   await groups.nth(0).locator('.entity-group-header input[type=checkbox]').check()
   await expect(groups.nth(0).locator('.entity-row input[type=checkbox]:checked')).toHaveCount(2)
 
@@ -211,9 +225,9 @@ test('delete, undo and redo restore text and anonymization as one history event'
   await expect(editor).toHaveText(text)
   await expect(page.locator('.entity-row input[type=checkbox]')).toBeChecked()
   await expect(page.locator('.cm-entity-PERSON')).toHaveText('Alex')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Sensitive [PERSON_1]')
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+  await showSource(page)
   // CodeMirror uses Mod-y on Windows and Linux (Mod-Shift-z on macOS).
   await editor.press('Control+y')
   await expect(editor).toHaveText('')
@@ -305,7 +319,7 @@ test('IndexedDB v1 migration preserves documents and populates the metadata hist
   await open(page, 'legacy')
   await expect(page.locator('.cm-content')).toHaveText(source)
   await expect(page.locator('.entity-row input[type=checkbox]')).toBeChecked()
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Legacy [PERSON_1]')
 })
 
@@ -330,7 +344,7 @@ test('importing a newer revision of the current document updates the reopened ed
   await expect(page.locator('.entity-row .cell-placeholder')).toHaveText('[OTHER_1]')
   await expect(page.locator('.entity-row input[type=checkbox]')).not.toBeChecked()
   await page.locator('.entity-row input[type=checkbox]').check()
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Revised [OTHER_1] with new terms')
 })
 
@@ -343,7 +357,7 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   const expected = 'Before [Изображение удалено при обезличивании] After.\n[Изображение удалено при обезличивании]'
   await seed(page, [document('images', source)])
   await open(page, 'images')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText(expected)
   await copyFromExportMenu(page)
   await expect(page.locator('.toast')).toContainText('Текст скопирован')
@@ -442,15 +456,15 @@ test('accepting a related candidate merges it into the original placeholder and 
   await page.getByRole('tab', { name: /Найденные данные/ }).click()
   await expect(page.locator('.entity-row')).toHaveCount(1)
   await expect(page.locator('.entity-row .cell-count')).toHaveText('2')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Signed by [PERSON_1]. [PERSON_1] agreed.')
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+  await showSource(page)
 
   await page.locator('.cm-content').press('Control+z')
   await expect(page.locator('.entity-row .cell-count')).toHaveText('1')
   await page.getByRole('tab', { name: /Проверка/ }).click()
   await expect(page.locator('.candidate-card')).toContainText('Smith')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('Signed by [PERSON_1]. Smith agreed.')
 })
 
@@ -504,7 +518,7 @@ test('the review queue walks candidates with buttons and keys, rejects, restores
   await card.getByRole('button', { name: 'Принять все похожие на [PERSON_1] (2)' }).click()
   await expect(page.locator('.review-done')).toContainText('Все кандидаты разобраны')
   await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('[PERSON_1] signed. [PERSON_1] agreed. [PERSON_1] left. [PERSON_2] came.')
 })
 
@@ -532,9 +546,9 @@ test('a found value opens its actions on click and can be merged and deleted fro
   await alexRow.getByRole('button', { name: 'Объединить', exact: true }).click()
   await expect(page.locator('.entity-row')).toHaveCount(1)
   await expect(page.locator('.entity-row .cell-count')).toHaveText('2')
-  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await showResult(page)
   await expect(page.locator('.anonymized-preview')).toHaveText('[PERSON_1] met [PERSON_1]')
-  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+  await showSource(page)
 
   const row = page.locator('.entity-row')
   await row.locator('.entity-value-button').click()
@@ -542,4 +556,46 @@ test('a found value opens its actions on click and can be merged and deleted fro
   await expect(page.locator('.entity-row')).toHaveCount(0)
   // Without any replacement the view toggle is hidden; the summary reports it.
   await expect(page.locator('.status-summary')).toHaveText('Замен пока нет')
+})
+
+test('the result stands beside the source in a wide window, and the choice survives a reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const text = 'Sensitive Alex\n\n| Name | Note |\n|---|---|\n| Alex | ok |'
+  const positions = [...text.matchAll(/Alex/g)].map((m) => ({ start: m.index!, end: m.index! + 4 }))
+  const alex: Entity = { id: 'alex', type: 'PERSON', value: 'Alex', placeholder: '[PERSON_1]', positions, anonymize: true, manual: false }
+  await seed(page, [document('A', text, [alex])])
+  await open(page, 'A')
+
+  const preview = page.locator('.anonymized-preview')
+  await expect(page.locator('.cm-content')).toBeVisible()
+  await expect(preview).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Результат', exact: true })).toHaveCount(0)
+  await expect(preview.locator('mark.anon-replaced')).toHaveText(['[PERSON_1]', '[PERSON_1]'])
+  await expect(preview.locator('.preview-line.is-table')).toHaveCount(3)
+  await expect(page.locator('.cm-table-line')).toHaveCount(3)
+
+  // Choosing a value scrolls the result to it and marks it.
+  await page.getByRole('tab', { name: /Найденные данные/ }).click()
+  await page.locator('.entity-row .entity-value-button').click()
+  await expect(preview.locator('mark.anon-replaced.is-focused')).toHaveCount(1)
+
+  const option = page.getByRole('checkbox', { name: 'Результат рядом' })
+  await option.uncheck()
+  await expect(preview).toBeHidden()
+  await page.getByRole('button', { name: 'Результат', exact: true }).click()
+  await expect(preview).toBeVisible()
+  await expect(page.locator('.cm-content')).toBeHidden()
+
+  await page.reload()
+  await open(page, 'A')
+  await expect(page.getByRole('checkbox', { name: 'Результат рядом' })).not.toBeChecked()
+  await expect(preview).toBeHidden()
+
+  // In a narrow window the option is not offered and the toggle is used.
+  await page.getByRole('checkbox', { name: 'Результат рядом' }).check()
+  await page.setViewportSize({ width: 1000, height: 900 })
+  await expect(page.getByRole('checkbox', { name: 'Результат рядом' })).toHaveCount(0)
+  await expect(preview).toBeHidden()
+  await showResult(page)
+  await expect(page.locator('.cm-content')).toBeHidden()
 })
