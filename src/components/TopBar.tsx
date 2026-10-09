@@ -16,8 +16,6 @@ interface TopBarProps {
   onDragOver: (event: DragEvent<HTMLElement>) => void
   onDragLeave: () => void
   onDrop: (event: DragEvent<HTMLElement>) => void
-  forceOcr: boolean
-  onForceOcrChange: (value: boolean) => void
   onPickFile: () => void
   historyDocs: HistoryDocMeta[]
   currentDocId: string | null
@@ -39,7 +37,7 @@ function SaveStatus({ state }: { state: TopBarProps['saveState'] }) {
 
 function TopBar({
   fileName, saveState, isLoading, isDragging, onDragOver, onDragLeave, onDrop,
-  forceOcr, onForceOcrChange, onPickFile,
+  onPickFile,
   historyDocs, currentDocId, onOpenDoc, onShowAllDocs, onExportHistory, onImportHistory,
 }: TopBarProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -70,26 +68,15 @@ function TopBar({
         <SaveStatus state={saveState} />
       </div>
       <div className="topbar-actions">
-        <Menu label="Новый файл" icon={<UploadIcon />} disabled={isLoading} panelClassName="menu-panel-wide">
-          {(close) => (
-            <>
-              <button type="button" className="menu-item" onClick={() => { close(); onPickFile() }}>
-                <span className="menu-item-title">Выбрать .docx или .pdf…</span>
-                <span className="menu-item-hint">Или перетащите файл на эту панель</span>
-              </button>
-              <div className="menu-separator" />
-              <label className="menu-check">
-                <input type="checkbox" checked={forceOcr} onChange={(event) => onForceOcrChange(event.target.checked)} />
-                <span>
-                  <span className="menu-item-title">Распознать все страницы через OCR</span>
-                  <span className="menu-item-hint">
-                    Для сканов и PDF с поврежденным текстовым слоем. Применится к следующему загруженному файлу.
-                  </span>
-                </span>
-              </label>
-            </>
-          )}
-        </Menu>
+        <button
+          type="button"
+          className="topbar-upload"
+          disabled={isLoading}
+          title="Или перетащите файл на эту панель"
+          onClick={onPickFile}
+        >
+          <UploadIcon />Новый файл
+        </button>
         <Menu label="История" icon={<ClockIcon />} panelClassName="menu-panel-wide">
           {(close) => (
             <>

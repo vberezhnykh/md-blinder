@@ -96,7 +96,10 @@ function App() {
   const [elapsedSec, setElapsedSec] = useState(0)
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null)
-  const [forceOcr, setForceOcr] = useState(false)
+  // PDF, загруженный в этом сеансе, и документ, который из него получился.
+  // Исходный файл в истории не хранится, поэтому повторное распознавание через
+  // OCR доступно только для только что загруженного PDF.
+  const [lastPdf, setLastPdf] = useState<{ file: File; docId: string; ocrForced: boolean } | null>(null)
   // Вкладка боковой панели, выбранная пользователем; без выбора открыта проверка,
   // если есть непроверенные кандидаты. Сбрасывается при смене документа.
   const [sideTab, setSideTab] = useState<SideTab | null>(null)
@@ -245,7 +248,7 @@ function App() {
     }
   }, [flush, refreshHistory, setHistoryError, snapshotRef, cancelAnalysis, replace])
 
-  const processFile = useCallback(async (file: File) => {
+  const processFile = useCallback(async (file: File, forceOcr = false) => {
     cancelAnalysis()
     const job = startJob()
     setError('')
@@ -303,8 +306,10 @@ function App() {
       // без ОПФ) ищутся правилами без NER, поэтому их можно предложить сразу.
       const related = findRelatedOccurrences(md, result.entities)
       const now = Date.now()
-      replace({ id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now,
+      const docId = crypto.randomUUID()
+      replace({ id: docId, name: file.name, format: kind, createdAt: now,
         updatedAt: now, sourceText: md, entities: [...result.entities, ...related] }, true)
+      setLastPdf(kind === 'pdf' ? { file, docId, ocrForced: forceOcr } : null)
       setNerNotice(nerFailed)
       setView('source')
       setSideTab(null)
@@ -320,7 +325,15 @@ function App() {
     } finally {
       job.finish()
     }
-  }, [cancelAnalysis, startJob, flush, replace, forceOcr])
+  }, [cancelAnalysis, startJob, flush, replace])
+
+  // Текстовый слой PDF может быть испорчен (сломанная кодировка шрифтов, ошибки
+  // старого OCR). Автоматика ему доверяет, а битый текст виден только в
+  // результате, поэтому повторное распознавание предлагается после загрузки.
+  // Новый документ сохраняется отдельно: правки разметки в прежнем не теряются.
+  const retryWithOcr = useCallback(() => {
+    if (lastPdf) void processFile(lastPdf.file, true)
+  }, [lastPdf, processFile])
 
   const isLoading = status === 'loading'
 
@@ -534,17 +547,6 @@ function App() {
             </p>
             {fileName && <p className="filename">Файл: {fileName}</p>}
           </div>
-          {!isLoading && (
-            <label className="upload-option">
-              <input type="checkbox" checked={forceOcr} onChange={(event) => setForceOcr(event.target.checked)} />
-              <span>
-                <span className="upload-option-title">Распознать все страницы через OCR</span>
-                <span className="upload-option-hint">
-                  Для сканов и PDF с поврежденным текстовым слоем. Применится к следующему загруженному файлу.
-                </span>
-              </span>
-            </label>
-          )}
         </div>
       )}
 
@@ -581,8 +583,6 @@ function App() {
           onDragOver={handleDragOver}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
-          forceOcr={forceOcr}
-          onForceOcrChange={setForceOcr}
           onPickFile={openFilePicker}
           historyDocs={visibleHistory}
           currentDocId={currentDocId}
@@ -609,6 +609,15 @@ function App() {
             onCopy={() => void handleCopy()}
             onExportCsv={handleExportCsv}
           />
+          {lastPdf && lastPdf.docId === currentDocId && !lastPdf.ocrForced && !isLoading && (
+            <p className="ocr-retry">
+              Текст выглядит битым или с ошибками?{' '}
+              <button type="button" className="link-button" onClick={retryWithOcr}>
+                Распознать заново через OCR
+              </button>
+              <span className="ocr-retry-hint"> Все страницы PDF будут распознаны как изображения. Прежняя версия останется в истории.</span>
+            </p>
+          )}
           {nerNotice && (
             <p className="ner-notice">
               Модель распознавания имен, компаний и адресов не загрузилась (при первом запуске нужен

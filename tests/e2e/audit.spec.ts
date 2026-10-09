@@ -370,7 +370,7 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   expect((await readSaved(page, 'images'))?.sourceText).toBe(source)
 })
 
-test('the top bar menus open documents and hold the OCR option for the next file', async ({ page }) => {
+test('the top bar opens documents from the history menu and picks a new file', async ({ page }) => {
   await seed(page, [document('A', 'first document'), document('B', 'second document')])
   await open(page, 'A')
   await expect(page.locator('.topbar-filename')).toHaveText('Synthetic A.docx')
@@ -393,15 +393,13 @@ test('the top bar menus open documents and hold the OCR option for the next file
   await expect(historyButton).toBeFocused()
 
   // A click outside closes the menu as well.
-  const newFileButton = page.getByRole('button', { name: 'Новый файл', exact: true })
-  await newFileButton.click()
-  const ocr = page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })
-  await expect(ocr).not.toBeChecked()
-  await ocr.check()
+  await historyButton.click()
   await page.locator('.cm-content').click()
   await expect(page.locator('.menu-panel')).toHaveCount(0)
-  await newFileButton.click()
-  await expect(page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })).toBeChecked()
+
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Новый файл', exact: true }).click()
+  await chooser
 })
 
 test('the status strip follows the review and the export menu holds the replacement table', async ({ page }) => {
@@ -600,22 +598,70 @@ test('the result stands beside the source in a wide window, and the choice survi
   await expect(page.locator('.cm-content')).toBeHidden()
 })
 
-test('the start screen states privacy and the first download, and the OCR option sits in the upload zone', async ({ page }) => {
+test('the start screen states privacy and the first download and asks nothing about OCR up front', async ({ page }) => {
   await seed(page, [document('A', 'text')])
   await expect(page.locator('.start-fact.is-privacy')).toContainText('Документы не покидают браузер')
   await expect(page.locator('.start-facts')).toContainText('580 МБ')
   await expect(page.locator('.history-panel')).toContainText('без шифрования')
 
-  let chooserOpened = false
-  page.on('filechooser', () => { chooserOpened = true })
-  const ocr = page.locator('.upload').getByRole('checkbox', { name: /Распознать все страницы через OCR/ })
-  await ocr.check()
-  await expect(ocr).toBeChecked()
-  await page.waitForTimeout(300)
-  expect(chooserOpened).toBe(false)
+  await expect(page.getByRole('checkbox', { name: /OCR/ })).toHaveCount(0)
 
-  // The option is shared with the top bar menu on the document screen.
+  // A document opened from history has no PDF file in memory to recognize again.
   await open(page, 'A')
-  await page.getByRole('button', { name: 'Новый файл', exact: true }).click()
-  await expect(page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })).toBeChecked()
+  await expect(page.locator('.ocr-retry')).toHaveCount(0)
+})
+
+// A one-page PDF with a text layer, built by hand so the test carries no real document.
+function syntheticPdf(text: string): Buffer {
+  const stream = `BT /F1 18 Tf 72 720 Td (${text}) Tj ET`
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets: number[] = []
+  objects.forEach((body, i) => {
+    offsets.push(pdf.length)
+    pdf += `${i + 1} 0 obj\n${body}\nendobj\n`
+  })
+  const xref = pdf.length
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  pdf += offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+  return Buffer.from(pdf, 'latin1')
+}
+
+test('a freshly uploaded PDF offers to recognize it again through OCR', async ({ page, context }) => {
+  // No model or OCR data is downloaded in this test: detection falls back to rules.
+  await context.route(/^https:\/\//, (route) => route.abort())
+  // pdf.js 6 relies on Map#getOrInsertComputed; older test browsers lack it.
+  await page.addInitScript(() => {
+    for (const proto of [Map.prototype, WeakMap.prototype] as Array<Map<unknown, unknown>>) {
+      if ('getOrInsertComputed' in proto) continue
+      Object.defineProperty(proto, 'getOrInsertComputed', {
+        configurable: true,
+        writable: true,
+        value(this: Map<unknown, unknown>, key: unknown, make: (key: unknown) => unknown) {
+          if (!this.has(key)) this.set(key, make(key))
+          return this.get(key)
+        },
+      })
+    }
+  })
+  await page.goto('/')
+  await page.locator('input[type=file][accept=".docx,.pdf"]').setInputFiles({
+    name: 'synthetic.pdf', mimeType: 'application/pdf',
+    buffer: syntheticPdf('Synthetic agreement text for the OCR retry check'),
+  })
+  await expect(page.locator('.cm-content')).toContainText('Synthetic agreement text', { timeout: 30_000 })
+  const retry = page.locator('.ocr-retry')
+  await expect(retry).toContainText('Текст выглядит битым')
+  await retry.getByRole('button', { name: 'Распознать заново через OCR' }).click()
+  // Recognition starts again for the same file; OCR data is unreachable here, so
+  // the run either reports progress or fails, but the offer is gone.
+  await expect(page.locator('.status-block, .status.error')).toBeVisible()
+  await expect(page.locator('.ocr-retry')).toHaveCount(0)
 })
