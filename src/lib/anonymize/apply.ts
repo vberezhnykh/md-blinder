@@ -222,6 +222,12 @@ export function acceptCandidate(entities: Entity[], id: string): Entity[] {
   )
 }
 
+// Непроверенные кандидаты в порядке появления в тексте: очередь проверки.
+export function pendingCandidates(entities: Entity[]): Entity[] {
+  const first = (e: Entity) => (e.positions.length ? Math.min(...e.positions.map((p) => p.start)) : Infinity)
+  return entities.filter((e) => e.candidate && !e.dismissed).sort((a, b) => first(a) - first(b))
+}
+
 // Сущность, на которую похож кандидат, если она еще есть и того же типа.
 function relatedTarget(entities: Entity[], candidate: Entity): Entity | undefined {
   if (!candidate.relatedTo) return undefined

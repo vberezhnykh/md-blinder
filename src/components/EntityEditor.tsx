@@ -27,6 +27,10 @@ interface EntityEditorProps {
   reveal?: { from: number; to: number; nonce: number } | null
   onMergeEntity?: (sourceId: string, targetId: string) => void
   onHoverEntity?: (entityId: string | null) => void
+  // Кандидат, который сейчас разбирается в очереди проверки: он обведен в тексте.
+  // Смена nonce прокручивает редактор к кандидату без выделения и без фокуса,
+  // чтобы фокус оставался в карточке проверки.
+  currentCandidate?: { id: string | null; nonce: number }
 }
 
 interface SelectionPopupState {
@@ -62,6 +66,18 @@ const activeSpanField = StateField.define<ActiveSpan | null>({
   },
 })
 
+const setCurrentCandidateEffect = StateEffect.define<string | null>()
+
+const currentCandidateField = StateField.define<string | null>({
+  create: () => null,
+  update(current, transaction) {
+    for (const effect of transaction.effects) {
+      if (effect.is(setCurrentCandidateEffect)) current = effect.value
+    }
+    return current
+  },
+})
+
 class EntityHandleWidget extends WidgetType {
   side: 'left' | 'right'
   pos: number
@@ -84,7 +100,7 @@ class EntityHandleWidget extends WidgetType {
   }
 }
 
-function buildDecorations(entities: Entity[], active: ActiveSpan | null): DecorationSet {
+function buildDecorations(entities: Entity[], active: ActiveSpan | null, currentCandidateId: string | null): DecorationSet {
   const ranges = []
   let activePos: { start: number; end: number } | null = null
   if (active) {
@@ -99,7 +115,7 @@ function buildDecorations(entities: Entity[], active: ActiveSpan | null): Decora
       const isActive =
         activePos !== null && e.id === active?.entityId && p.start === active?.start && p.end === active?.end
       const cls = e.candidate
-        ? 'cm-entity cm-entity-candidate'
+        ? `cm-entity cm-entity-candidate${e.id === currentCandidateId ? ' cm-entity-current' : ''}`
         : `cm-entity cm-entity-${e.type}${e.anonymize ? '' : ' cm-entity-inactive'}`
       ranges.push(Decoration.mark({ class: isActive ? `${cls} cm-entity-active` : cls }).range(p.start, p.end))
     })
@@ -126,10 +142,11 @@ function buildDecorations(entities: Entity[], active: ActiveSpan | null): Decora
 }
 
 const entityDecorationField = StateField.define<DecorationSet>({
-  create: (state) => buildDecorations(state.field(entityMetadataField), null),
+  create: (state) => buildDecorations(state.field(entityMetadataField), null, null),
   update(deco, tr) {
-    if (tr.docChanged || tr.effects.some((effect) => effect.is(setEntityMetadata) || effect.is(setActiveSpanEffect))) {
-      return buildDecorations(tr.state.field(entityMetadataField), tr.state.field(activeSpanField))
+    if (tr.docChanged || tr.effects.some((effect) =>
+      effect.is(setEntityMetadata) || effect.is(setActiveSpanEffect) || effect.is(setCurrentCandidateEffect))) {
+      return buildDecorations(tr.state.field(entityMetadataField), tr.state.field(activeSpanField), tr.state.field(currentCandidateField))
     }
     return deco
   },
@@ -193,6 +210,7 @@ function EntityEditor({
   reveal,
   onMergeEntity,
   onHoverEntity,
+  currentCandidate,
 }: EntityEditorProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -445,6 +463,7 @@ function EntityEditor({
         entityMetadataField.init(() => entitiesRef.current),
         entityMetadataHistory,
         activeSpanField,
+        currentCandidateField,
         entityDecorationField,
         hoverHandlers,
         dragHandlers,
@@ -501,6 +520,23 @@ function EntityEditor({
       textChanged ? { from: 0, to: view.state.doc.length, insert: value } : undefined,
     ))
   }, [value, entities])
+
+  const currentCandidateId = currentCandidate?.id ?? null
+  const currentCandidateNonce = currentCandidate?.nonce ?? 0
+  const scrolledNonceRef = useRef(0)
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const effects: StateEffect<unknown>[] = [setCurrentCandidateEffect.of(currentCandidateId)]
+    if (currentCandidateNonce !== scrolledNonceRef.current) {
+      scrolledNonceRef.current = currentCandidateNonce
+      const position = entitiesRef.current.find((e) => e.id === currentCandidateId)?.positions[0]
+      if (position && position.start <= view.state.doc.length) {
+        effects.push(EditorView.scrollIntoView(position.start, { y: 'center' }))
+      }
+    }
+    view.dispatch({ effects })
+  }, [currentCandidateId, currentCandidateNonce])
 
   useEffect(() => {
     const view = viewRef.current

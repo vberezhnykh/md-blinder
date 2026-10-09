@@ -63,6 +63,10 @@ async function downloadedText(download: Download) {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+async function acceptCurrentCandidate(page: Page) {
+  await page.locator('.candidate-card').getByRole('button', { name: /^Принять/ }).first().click()
+}
+
 async function copyFromExportMenu(page: Page) {
   await page.getByRole('button', { name: 'Другие варианты выдачи', exact: true }).click()
   await page.getByRole('button', { name: /^Копировать текст/ }).click()
@@ -85,10 +89,11 @@ test('export and copy use the current anonymization immediately and report unrev
   await seed(page, [document('A', text, [person(text, false), candidate])])
   await open(page, 'A')
   await expect(page.getByRole('button', { name: 'Контрольная проверка' })).toHaveCount(0)
-  await page.locator('.entity-row:not(.candidate-row) input[type=checkbox]').check()
+  await page.getByRole('tab', { name: /Найденные данные/ }).click()
+  await page.locator('.entity-row input[type=checkbox]').check()
 
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
+  await page.locator('.status-strip').getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await downloadPromise)).toBe('Sensitive [PERSON_1], contact alice@example.test')
   await expect(page.locator('dialog')).toHaveCount(0)
   await expect(page.locator('.toast')).toContainText('Не проверено: 1 кандидат')
@@ -102,9 +107,10 @@ test('export and copy use the current anonymization immediately and report unrev
   await expect(page.locator('.toast')).toContainText(/Текст скопирован.*Не проверено: 1 кандидат/s)
   await page.locator('.toast').getByRole('button', { name: 'Показать', exact: true }).click()
   await expect(page.locator('.editor-layout')).toBeVisible()
-  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
+  await expect(page.getByRole('tab', { name: /Проверка/ })).toHaveAttribute('aria-selected', 'true')
+  await acceptCurrentCandidate(page)
   const acceptedDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
+  await page.locator('.status-strip').getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await acceptedDownload)).toBe('Sensitive [PERSON_1], contact [EMAIL_1]')
   await expect(page.getByRole('button', { name: /Не проверено/ })).toHaveCount(0)
   await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
@@ -345,7 +351,7 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   const copied = await page.evaluate(() => navigator.clipboard.readText())
   expect(copied.replace(/\r\n/g, '\n')).toBe(expected)
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
+  await page.locator('.status-strip').getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await downloadPromise)).toBe(expected)
   expect((await readSaved(page, 'images'))?.sourceText).toBe(source)
 })
@@ -407,7 +413,7 @@ test('the status strip follows the review and the export menu holds the replacem
   expect(await downloadedText(csv)).toContain('Alex')
   await expect(page.locator('.menu-panel')).toHaveCount(0)
 
-  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
+  await acceptCurrentCandidate(page)
   await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
   await expect(page.locator('.status-steps [aria-current="step"] .status-step-label')).toHaveText('Выдача')
   await expect(page.locator('.status-summary')).toHaveText('Заменено 2 значения в 2 местах')
@@ -428,10 +434,12 @@ test('accepting a related candidate merges it into the original placeholder and 
   }
   await seed(page, [document('A', text, [original, candidate])])
   await open(page, 'A')
-  await expect(page.locator('.candidate-row .candidate-note')).toHaveText('Похоже на [PERSON_1]')
+  await expect(page.locator('.candidate-card .candidate-reason')).toHaveText('Похоже на [PERSON_1]')
 
-  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
-  await expect(page.locator('.candidate-row')).toHaveCount(0)
+  await acceptCurrentCandidate(page)
+  await expect(page.locator('.candidate-card')).toHaveCount(0)
+  await expect(page.locator('.review-done')).toContainText('Все кандидаты разобраны')
+  await page.getByRole('tab', { name: /Найденные данные/ }).click()
   await expect(page.locator('.entity-row')).toHaveCount(1)
   await expect(page.locator('.entity-row .cell-count')).toHaveText('2')
   await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
@@ -439,8 +447,63 @@ test('accepting a related candidate merges it into the original placeholder and 
   await page.getByRole('button', { name: 'Редактор', exact: true }).click()
 
   await page.locator('.cm-content').press('Control+z')
-  await expect(page.locator('.candidate-row')).toHaveCount(1)
-  await expect(page.locator('.entity-row:not(.candidate-row) .cell-count')).toHaveText('1')
+  await expect(page.locator('.entity-row .cell-count')).toHaveText('1')
+  await page.getByRole('tab', { name: /Проверка/ }).click()
+  await expect(page.locator('.candidate-card')).toContainText('Smith')
   await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
   await expect(page.locator('.anonymized-preview')).toHaveText('Signed by [PERSON_1]. Smith agreed.')
+})
+
+test('the review queue walks candidates with buttons and keys, rejects, restores and accepts related ones together', async ({ page }) => {
+  const text = 'Alex Smith signed. Smith agreed. A. Smith left. Bob came.'
+  const at = (value: string, from = 0) => {
+    const start = text.indexOf(value, from)
+    return [{ start, end: start + value.length }]
+  }
+  const original: Entity = {
+    id: 'person-smith', type: 'PERSON', value: 'Alex Smith', placeholder: '[PERSON_1]',
+    positions: at('Alex Smith'), anonymize: true, manual: false,
+  }
+  const candidate = (id: string, value: string, placeholder: string, from: number, extra: Partial<Entity>): Entity => ({
+    id, type: 'PERSON', value, placeholder, positions: at(value, from), anonymize: false, manual: false, candidate: true, ...extra,
+  })
+  const surname = candidate('c-surname', 'Smith', '[PERSON_2]', text.indexOf('Smith agreed'), { relatedTo: 'person-smith' })
+  const initials = candidate('c-initials', 'A. Smith', '[PERSON_3]', 0, { relatedTo: 'person-smith' })
+  const bob = candidate('c-bob', 'Bob', '[PERSON_4]', 0, { candidateNote: 'Низкая уверенность модели' })
+  await seed(page, [document('A', text, [original, surname, initials, bob])])
+  await open(page, 'A')
+
+  const card = page.locator('.candidate-card')
+  await expect(page.getByRole('tab', { name: /Проверка/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(card.locator('.candidate-card-count')).toHaveText('Кандидат 1 из 3')
+  await expect(card.locator('.candidate-card-value')).toHaveText('Smith')
+  await expect(card.locator('.candidate-card-context mark')).toHaveText('Smith')
+  await expect(page.locator('.cm-entity-current')).toHaveText('Smith')
+
+  await card.getByRole('button', { name: 'Следующий кандидат' }).click()
+  await expect(card.locator('.candidate-card-value')).toHaveText('A. Smith')
+  await expect(page.locator('.cm-entity-current')).toHaveText('A. Smith')
+  await expect(card).toBeFocused()
+
+  // Backspace rejects the current candidate and moves on to the next one.
+  await page.keyboard.press('Backspace')
+  await expect(card.locator('.candidate-card-count')).toHaveText('Кандидат 2 из 2')
+  await expect(card.locator('.candidate-card-value')).toHaveText('Bob')
+  await expect(card.locator('.candidate-reason')).toHaveText('Низкая уверенность модели')
+  await expect(card).toBeFocused()
+
+  // Enter on the card accepts; a candidate without a related entity gets its own placeholder.
+  await page.keyboard.press('Enter')
+  await expect(card.locator('.candidate-card-count')).toHaveText('Кандидат 1 из 1')
+  await expect(card.locator('.candidate-card-value')).toHaveText('Smith')
+
+  await page.locator('.review-dismissed summary').click()
+  await page.locator('.review-dismissed').getByRole('button', { name: 'Вернуть', exact: true }).click()
+  await expect(card.locator('.candidate-card-count')).toHaveText('Кандидат 1 из 2')
+
+  await card.getByRole('button', { name: 'Принять все похожие на [PERSON_1] (2)' }).click()
+  await expect(page.locator('.review-done')).toContainText('Все кандидаты разобраны')
+  await expect(page.locator('.status-chip.is-ready')).toHaveText('Готово к выдаче')
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('[PERSON_1] signed. [PERSON_1] agreed. [PERSON_1] left. [PERSON_2] came.')
 })

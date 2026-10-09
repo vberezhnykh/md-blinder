@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { candidateReason, entityCurrentValue } from '../lib/anonymize/apply'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
 interface EntityListProps {
@@ -9,12 +9,17 @@ interface EntityListProps {
   onChangeType: (id: string, type: EntityType) => void
   onDelete: (id: string) => void
   onSelect?: (entity: Entity) => void
-  onAcceptCandidate?: (id: string) => void
-  onRejectCandidate?: (id: string) => void
   onMergeEntity?: (sourceId: string, targetId: string) => void
   onSetAnonymize?: (ids: string[], anonymize: boolean) => void
   highlightedId?: string | null
+  // Вкладки боковой панели: очередь проверки кандидатов и найденные данные.
+  tab: SideTab
+  onTabChange: (tab: SideTab) => void
+  pendingCount: number
+  review: ReactNode
 }
+
+export type SideTab = 'review' | 'found'
 
 function minStart(e: Entity): number {
   return e.positions.length ? Math.min(...e.positions.map((p) => p.start)) : Infinity
@@ -22,11 +27,6 @@ function minStart(e: Entity): number {
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s
-}
-
-// Цветная метка повторяет подсветку типа в редакторе — так список служит легендой.
-function TypeDot({ type }: { type: EntityType }) {
-  return <span className="type-dot" style={{ background: `var(--ent-${type})` }} aria-hidden="true" />
 }
 
 function TypeSelect({ entity, onChangeType }: { entity: Entity; onChangeType: EntityListProps['onChangeType'] }) {
@@ -72,35 +72,30 @@ function EntityList({
   onChangeType,
   onDelete,
   onSelect,
-  onAcceptCandidate,
-  onRejectCandidate,
   onMergeEntity,
   onSetAnonymize,
   highlightedId = null,
+  tab,
+  onTabChange,
+  pendingCount,
+  review,
 }: EntityListProps) {
   const paneRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<EntityType>>(new Set())
   const [mergeSource, setMergeSource] = useState<string | null>(null)
   const [mergeTarget, setMergeTarget] = useState('')
-  const { confirmed, candidates, byType } = useMemo(() => {
+  const { confirmed, byType } = useMemo(() => {
     const confirmed: Entity[] = []
-    const candidates: Entity[] = []
     const byType = new Map<EntityType, Entity[]>()
     for (const entity of entities) {
-      if (entity.dismissed) continue
-      if (entity.candidate) {
-        candidates.push(entity)
-      } else {
-        confirmed.push(entity)
-        const group = byType.get(entity.type)
-        if (group) group.push(entity)
-        else byType.set(entity.type, [entity])
-      }
+      if (entity.dismissed || entity.candidate) continue
+      confirmed.push(entity)
+      const group = byType.get(entity.type)
+      if (group) group.push(entity)
+      else byType.set(entity.type, [entity])
     }
-    confirmed.sort((a, b) => minStart(a) - minStart(b))
-    candidates.sort((a, b) => minStart(a) - minStart(b))
     for (const group of byType.values()) group.sort((a, b) => minStart(a) - minStart(b))
-    return { confirmed, candidates, byType }
+    return { confirmed, byType }
   }, [entities])
   // Группы идут в постоянном порядке типов, внутри группы — по месту в тексте.
   const groups = ALL_ENTITY_TYPES.filter((t) => byType.has(t)).map((t) => ({ type: t, items: byType.get(t)! }))
@@ -154,211 +149,196 @@ function EntityList({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightedId])
 
-  if (!confirmed.length && !candidates.length) {
-    return (
-      <div className="entity-pane" ref={paneRef}>
-        <h3>Найденные данные</h3>
-        <p className="text-muted">Ничего не найдено. Выделите текст в редакторе, чтобы добавить замену вручную.</p>
-      </div>
-    )
-  }
-
   return (
     <div className="entity-pane" ref={paneRef}>
-      {/* Кандидаты идут первыми: они не заменяются, пока их не принять, и при
-          длинном списке внизу их легко не заметить. */}
-      {candidates.length > 0 && (
-        <section className="candidates-section" id="candidates">
-          <h3>Проверьте вручную ({candidates.length})</h3>
-          <p className="candidates-hint">Эти фрагменты пока не заменяются. Примите или отклоните каждый.</p>
-          {candidates.map((entity) => {
-            const value = entityCurrentValue(sourceText, entity)
-            const reason = candidateReason(entities, entity)
-            return (
-              <div
-                className={`entity-row candidate-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
-                key={entity.id}
-                data-entity-id={entity.id}
-              >
-                <TypeDot type={entity.type} />
-                <div className="entity-main">
-                  <EntityValue entity={entity} value={value} onSelect={onSelect} />
-                  {reason && <span className="candidate-note">{reason}</span>}
-                  <div className="entity-meta">
-                    <TypeSelect entity={entity} onChangeType={onChangeType} />
-                    <button
-                      type="button"
-                      className="entity-accept"
-                      title="Принять"
-                      onClick={() => onAcceptCandidate?.(entity.id)}
-                    >
-                      Принять
-                    </button>
-                    <button
-                      type="button"
-                      className="entity-reject"
-                      title="Отклонить"
-                      onClick={() => onRejectCandidate?.(entity.id)}
-                    >
-                      Отклонить
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </section>
+      <div className="side-tabs" role="tablist" aria-label="Боковая панель">
+        <button
+          type="button"
+          role="tab"
+          id="side-tab-review"
+          aria-selected={tab === 'review'}
+          aria-controls="side-panel-review"
+          className={`side-tab${tab === 'review' ? ' is-selected' : ''}`}
+          onClick={() => onTabChange('review')}
+        >
+          Проверка
+          <span className={`side-tab-badge${pendingCount > 0 ? ' is-pending' : ' is-done'}`}>{pendingCount > 0 ? pendingCount : '✓'}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="side-tab-found"
+          aria-selected={tab === 'found'}
+          aria-controls="side-panel-found"
+          className={`side-tab${tab === 'found' ? ' is-selected' : ''}`}
+          onClick={() => onTabChange('found')}
+        >
+          Найденные данные
+          <span className="side-tab-badge">{confirmed.length}</span>
+        </button>
+      </div>
+
+      {tab === 'review' && (
+        <div className="side-panel" role="tabpanel" id="side-panel-review" aria-labelledby="side-tab-review">
+          {review}
+        </div>
       )}
 
-      <h3>Найденные данные ({confirmed.length})</h3>
-      {groups.map(({ type, items }) => {
-        const active = items.filter((e) => e.anonymize).length
-        const isCollapsed = collapsed.has(type)
-        const groupHighlighted = isCollapsed && items.some((e) => e.id === highlightedId)
-        return (
-          <section
-            className="entity-group"
-            key={type}
-            style={{ '--group-color': `var(--ent-${type})` } as CSSProperties}
-          >
-            <div
-              className={`entity-group-header${groupHighlighted ? ' is-highlighted' : ''}`}
-              data-group-type={type}
+      {tab === 'found' && (
+        <div className="side-panel" role="tabpanel" id="side-panel-found" aria-labelledby="side-tab-found">
+        {confirmed.length === 0 && (
+          <p className="text-muted">Ничего не найдено. Выделите текст в редакторе, чтобы добавить замену вручную.</p>
+        )}
+        {groups.map(({ type, items }) => {
+          const active = items.filter((e) => e.anonymize).length
+          const isCollapsed = collapsed.has(type)
+          const groupHighlighted = isCollapsed && items.some((e) => e.id === highlightedId)
+          return (
+            <section
+              className="entity-group"
+              key={type}
+              style={{ '--group-color': `var(--ent-${type})` } as CSSProperties}
             >
-              <input
-                type="checkbox"
-                checked={active === items.length}
-                ref={(el) => { if (el) el.indeterminate = active > 0 && active < items.length }}
-                onChange={() => onSetAnonymize?.(items.map((e) => e.id), active < items.length)}
-                title="Заменять все значения этого типа"
-                aria-label={`Заменять все ${type}`}
-              />
-              <button
-                type="button"
-                className="entity-group-toggle"
-                aria-expanded={!isCollapsed}
-                onClick={() => setCollapsed((prev) => {
-                  const next = new Set(prev)
-                  if (next.has(type)) next.delete(type)
-                  else next.add(type)
-                  return next
-                })}
+              <div
+                className={`entity-group-header${groupHighlighted ? ' is-highlighted' : ''}`}
+                data-group-type={type}
               >
-                <span className="entity-group-chevron" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
-                <span className="entity-group-name">{type}</span>
-                <span className="entity-group-count">
-                  {active === items.length ? items.length : `${active} из ${items.length}`}
-                </span>
-              </button>
-            </div>
-            {!isCollapsed && <div className="entity-group-items">{items.map((entity) => {
-              const value = entityCurrentValue(sourceText, entity)
-              const sameType = byType.get(entity.type)!
-              const canMerge = sameType.length >= 2 && !!onMergeEntity
-              const isMerging = mergeSource === entity.id
-              return (
-                <div
-                  className={`entity-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
-                  key={entity.id}
-                  data-entity-id={entity.id}
+                <input
+                  type="checkbox"
+                  checked={active === items.length}
+                  ref={(el) => { if (el) el.indeterminate = active > 0 && active < items.length }}
+                  onChange={() => onSetAnonymize?.(items.map((e) => e.id), active < items.length)}
+                  title="Заменять все значения этого типа"
+                  aria-label={`Заменять все ${type}`}
+                />
+                <button
+                  type="button"
+                  className="entity-group-toggle"
+                  aria-expanded={!isCollapsed}
+                  onClick={() => setCollapsed((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(type)) next.delete(type)
+                    else next.add(type)
+                    return next
+                  })}
                 >
-                  <input
-                    type="checkbox"
-                    checked={entity.anonymize}
-                    onChange={() => onToggle(entity.id)}
-                    title="Заменять в итоговом тексте"
-                    aria-label={`Заменять «${truncate(value, 40)}»`}
-                  />
-                  {isMerging ? (
-                    <div className="entity-merge-edit">
-                      <span className="cell-placeholder">{entity.placeholder}</span>
-                      <span className="merge-arrow">→</span>
-                      <select
-                        className="merge-target"
-                        aria-label="Объединить с"
-                        value={mergeTarget}
-                        onChange={(e) => setMergeTarget(e.target.value)}
-                      >
-                        <option value="">объединить с…</option>
-                        {sameType
-                          .filter((t) => t.id !== entity.id)
-                          .map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.placeholder} · {truncate(entityCurrentValue(sourceText, t), 24)}
-                            </option>
-                          ))}
-                      </select>
-                      <button
-                        type="button"
-                        className="entity-accept"
-                        title="Объединить"
-                        disabled={!mergeTarget}
-                        onClick={() => {
-                          onMergeEntity?.(entity.id, mergeTarget)
-                          setMergeSource(null)
-                          setMergeTarget('')
-                        }}
-                      >
-                        Объединить
-                      </button>
-                      <button
-                        type="button"
-                        className="entity-cancel"
-                        onClick={() => {
-                          setMergeSource(null)
-                          setMergeTarget('')
-                        }}
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="entity-main">
-                        <EntityValue entity={entity} value={value} onSelect={onSelect} />
-                        <div className="entity-meta">
-                          <span className="cell-placeholder" title={entity.placeholder}>
-                            {entity.placeholder}
-                          </span>
-                          <TypeSelect entity={entity} onChangeType={onChangeType} />
-                          {/* «×» рисуется через ::before — e2e читают отсюда голое число */}
-                          <span className="cell-count" title="Вхождений в тексте">
-                            {entity.positions.length}
-                          </span>
-                          {canMerge && (
-                            <button
-                              type="button"
-                              className="entity-merge"
-                              title="Объединить с другой заменой того же типа"
-                              onClick={() => {
-                                setMergeSource(entity.id)
-                                setMergeTarget('')
-                              }}
-                            >
-                              Объединить
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      <div className="entity-actions">
+                  <span className="entity-group-chevron" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
+                  <span className="entity-group-name">{type}</span>
+                  <span className="entity-group-count">
+                    {active === items.length ? items.length : `${active} из ${items.length}`}
+                  </span>
+                </button>
+              </div>
+              {!isCollapsed && <div className="entity-group-items">{items.map((entity) => {
+                const value = entityCurrentValue(sourceText, entity)
+                const sameType = byType.get(entity.type)!
+                const canMerge = sameType.length >= 2 && !!onMergeEntity
+                const isMerging = mergeSource === entity.id
+                return (
+                  <div
+                    className={`entity-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
+                    key={entity.id}
+                    data-entity-id={entity.id}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={entity.anonymize}
+                      onChange={() => onToggle(entity.id)}
+                      title="Заменять в итоговом тексте"
+                      aria-label={`Заменять «${truncate(value, 40)}»`}
+                    />
+                    {isMerging ? (
+                      <div className="entity-merge-edit">
+                        <span className="cell-placeholder">{entity.placeholder}</span>
+                        <span className="merge-arrow">→</span>
+                        <select
+                          className="merge-target"
+                          aria-label="Объединить с"
+                          value={mergeTarget}
+                          onChange={(e) => setMergeTarget(e.target.value)}
+                        >
+                          <option value="">объединить с…</option>
+                          {sameType
+                            .filter((t) => t.id !== entity.id)
+                            .map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.placeholder} · {truncate(entityCurrentValue(sourceText, t), 24)}
+                              </option>
+                            ))}
+                        </select>
                         <button
                           type="button"
-                          className="entity-delete"
-                          onClick={() => onDelete(entity.id)}
-                          title="Удалить"
-                          aria-label={`Удалить «${truncate(value, 40)}»`}
+                          className="entity-accept"
+                          title="Объединить"
+                          disabled={!mergeTarget}
+                          onClick={() => {
+                            onMergeEntity?.(entity.id, mergeTarget)
+                            setMergeSource(null)
+                            setMergeTarget('')
+                          }}
                         >
-                          ✕
+                          Объединить
+                        </button>
+                        <button
+                          type="button"
+                          className="entity-cancel"
+                          onClick={() => {
+                            setMergeSource(null)
+                            setMergeTarget('')
+                          }}
+                        >
+                          Отмена
                         </button>
                       </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}</div>}
-          </section>
-        )
-      })}
+                    ) : (
+                      <>
+                        <div className="entity-main">
+                          <EntityValue entity={entity} value={value} onSelect={onSelect} />
+                          <div className="entity-meta">
+                            <span className="cell-placeholder" title={entity.placeholder}>
+                              {entity.placeholder}
+                            </span>
+                            <TypeSelect entity={entity} onChangeType={onChangeType} />
+                            {/* «×» рисуется через ::before — e2e читают отсюда голое число */}
+                            <span className="cell-count" title="Вхождений в тексте">
+                              {entity.positions.length}
+                            </span>
+                            {canMerge && (
+                              <button
+                                type="button"
+                                className="entity-merge"
+                                title="Объединить с другой заменой того же типа"
+                                onClick={() => {
+                                  setMergeSource(entity.id)
+                                  setMergeTarget('')
+                                }}
+                              >
+                                Объединить
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="entity-actions">
+                          <button
+                            type="button"
+                            className="entity-delete"
+                            onClick={() => onDelete(entity.id)}
+                            title="Удалить"
+                            aria-label={`Удалить «${truncate(value, 40)}»`}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )
+              })}</div>}
+            </section>
+          )
+        })}
+        </div>
+      )}
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { detectFileKind } from './lib/fileType'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptRelatedCandidate, mergeEntities } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptRelatedCandidate, acceptAllRelated, restoreCandidate, pendingCandidates, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { findImageRanges } from './lib/anonymize/imageSafety'
 import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
@@ -14,7 +14,8 @@ import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory
 import { useDocumentSession } from './hooks/useDocumentSession'
 import { useAnalysisJob } from './hooks/useAnalysisJob'
 import { useHistoryStore } from './hooks/useHistoryStore'
-import EntityList from './components/EntityList'
+import EntityList, { type SideTab } from './components/EntityList'
+import CandidateReview from './components/CandidateReview'
 import HistoryPanel from './components/HistoryPanel'
 import AnonymizedPreview from './components/AnonymizedPreview'
 import Toast, { type ToastState } from './components/Toast'
@@ -86,6 +87,12 @@ function App() {
   const [reveal, setReveal] = useState<{ from: number; to: number; nonce: number } | null>(null)
   const [hoveredEntityId, setHoveredEntityId] = useState<string | null>(null)
   const [forceOcr, setForceOcr] = useState(false)
+  // Вкладка боковой панели, выбранная пользователем; без выбора открыта проверка,
+  // если есть непроверенные кандидаты. Сбрасывается при смене документа.
+  const [sideTab, setSideTab] = useState<SideTab | null>(null)
+  // Кандидат, выбранный в очереди проверки, и счетчик переходов: каждый переход
+  // прокручивает редактор к кандидату.
+  const [activeCandidate, setActiveCandidate] = useState<{ id: string | null; nonce: number }>({ id: null, nonce: 0 })
   const [toast, setToast] = useState<ToastState | null>(null)
   const toastKey = useRef(0)
   // Удаление из истории откладывается, пока в уведомлении доступна «Вернуть».
@@ -134,6 +141,8 @@ function App() {
       setFileName(meta.name)
       setNerNotice(false)
       setView('editor')
+      setSideTab(null)
+      setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
       setHasResult(true)
       setHistoryError('')
     } catch (err) {
@@ -288,6 +297,8 @@ function App() {
         updatedAt: now, sourceText: md, entities: [...result.entities, ...related] }, true)
       setNerNotice(nerFailed)
       setView('editor')
+      setSideTab(null)
+      setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
       setStatus('idle')
       setHasResult(true)
     } catch (e) {
@@ -324,9 +335,14 @@ function App() {
 
   const showCandidates = useCallback(() => {
     setView('editor')
-    requestAnimationFrame(() => {
-      document.getElementById('candidates')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    setSideTab('review')
+  }, [])
+
+  // Переход в очереди закрепляет вкладку проверки: после последнего решения
+  // панель показывает итог, а не перескакивает на найденные данные.
+  const activateCandidate = useCallback((id: string | null) => {
+    setActiveCandidate((prev) => ({ id, nonce: prev.nonce + 1 }))
+    setSideTab('review')
   }, [])
 
   // Копирование и экспорт мгновенные: текст берется из текущей разметки без
@@ -395,6 +411,14 @@ function App() {
     )
   }, [setEntities])
 
+  const handleAcceptAllRelated = useCallback((targetId: string) => {
+    setEntities((prev) => compactPlaceholderNumbers(acceptAllRelated(prev, targetId)))
+  }, [setEntities])
+
+  const handleRestoreCandidate = useCallback((id: string) => {
+    setEntities((prev) => restoreCandidate(prev, id))
+  }, [setEntities])
+
   const handleAddEntity = useCallback(
     (from: number, to: number) => {
       setEntities((prev) => compactPlaceholderNumbers(addEntityFromSelection(prev, sourceText, from, to, selectedType)))
@@ -420,6 +444,11 @@ function App() {
   }, [])
 
   const showViewToggle = entities.length > 0 || anonymizedText !== sourceText
+  const sidePanelTab: SideTab = sideTab ?? (unreviewedCount > 0 ? 'review' : 'found')
+  const currentCandidateId = useMemo(() => {
+    const pending = pendingCandidates(entities)
+    return (pending.find((e) => e.id === activeCandidate.id) ?? pending[0])?.id ?? null
+  }, [entities, activeCandidate.id])
   const replaced = useMemo(() => {
     const active = entities.filter((e) => e.anonymize)
     return { values: active.length, places: active.reduce((sum, e) => sum + e.positions.length, 0) }
@@ -603,6 +632,7 @@ function App() {
               reveal={reveal}
               onMergeEntity={handleMergeEntity}
               onHoverEntity={setHoveredEntityId}
+              currentCandidate={{ id: sidePanelTab === 'review' ? currentCandidateId : null, nonce: activeCandidate.nonce }}
             />
             </Suspense>
             <EntityList
@@ -612,11 +642,26 @@ function App() {
               onChangeType={handleChangeType}
               onDelete={handleDelete}
               onSelect={handleSelectEntity}
-              onAcceptCandidate={handleAcceptCandidate}
-              onRejectCandidate={handleRejectCandidate}
               onMergeEntity={handleMergeEntity}
               onSetAnonymize={handleSetAnonymize}
               highlightedId={hoveredEntityId}
+              tab={sidePanelTab}
+              onTabChange={setSideTab}
+              pendingCount={unreviewedCount}
+              review={(
+                <CandidateReview
+                  entities={entities}
+                  sourceText={sourceText}
+                  activeId={activeCandidate.id}
+                  onActivate={activateCandidate}
+                  onAccept={handleAcceptCandidate}
+                  onReject={handleRejectCandidate}
+                  onAcceptAllRelated={handleAcceptAllRelated}
+                  onRestore={handleRestoreCandidate}
+                  onChangeType={handleChangeType}
+                  onExport={handleExport}
+                />
+              )}
             />
           </div>
           <AnonymizedPreview
