@@ -12,22 +12,96 @@
   margin-bottom: 4px;
 }
 
+.app-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.app-title .blinder-mark { width: 26px; height: 26px; }
+
 .app-header p {
-  color: var(--pico-muted-color);
+  color: var(--ink-2);
   margin-top: 0;
 }
 
-.dropzone {
+/* ── стартовый экран: приватность и первая загрузка ── */
+.start-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.start-fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.start-fact .icon { flex: none; margin-top: 2px; color: var(--ink-3); }
+.start-fact strong { color: var(--ink); font-weight: 650; }
+.start-fact.is-privacy { border-color: #b9dcc6; background: var(--ready-wash); }
+.start-fact.is-privacy .icon { color: var(--ready); }
+
+/* Зона загрузки и ее настройка — одна рамка; флажок стоит вне кнопки выбора
+   файла, чтобы клик по нему не открывал диалог. */
+.upload {
+  margin-top: 20px;
   border: 1.5px dashed var(--line-2);
   border-radius: var(--radius);
-  padding: 56px 24px;
-  text-align: center;
-  cursor: pointer;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
-  margin-top: 28px;
+  transition: border-color 0.18s ease;
 }
+.upload:has(.dropzone:hover),
+.upload:has(.dropzone.dragging) { border-color: var(--accent); }
+
+.dropzone {
+  padding: 44px 24px 36px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: var(--radius) var(--radius) 0 0;
+  transition: background-color 0.18s ease;
+}
+
+.dropzone-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.dropzone-title {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 550;
+}
+
+.upload-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 20px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 14px;
+  cursor: pointer;
+}
+.upload-option input { margin: 3px 0 0; flex: none; }
+.upload-option-title { display: block; font-weight: 550; }
+.upload-option-hint { display: block; font-size: 12.5px; color: var(--ink-3); line-height: 1.45; }
 
 .dropzone:focus-visible {
   outline: 2px solid var(--accent);
@@ -36,13 +110,7 @@
   border-color: var(--accent);
 }
 
-.dropzone:hover {
-  border-color: var(--accent);
-}
-
 .dropzone.dragging {
-  border-color: var(--accent);
-  border-style: solid;
   background-color: var(--accent-wash);
 }
 
@@ -251,6 +319,7 @@
   font-size: 13px;
 }
 .history-error { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
+.history-warning { margin: 6px 0 4px; font-size: 12.5px; color: var(--warn); }
 .history-row {
   display: flex;
   align-items: center;
@@ -661,6 +730,9 @@ button.primary:hover:not(:disabled) {
   font-size: 13.5px;
   font-weight: 650;
 }
+
+/* В одной колонке вид уже назван переключателем «Исходник / Результат». */
+.editor-layout:not(.is-side-by-side) .pane-title { display: none; }
 
 .pane-hint {
   font-size: 12px;
@@ -1540,11 +1612,3 @@ mark.anon-unreplaced.is-focused {
   display: none !important;
 }
 
-.ocr-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-  margin: 0.75rem 0 0;
-  cursor: pointer;
-}

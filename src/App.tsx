@@ -22,6 +22,7 @@ import HistoryPanel from './components/HistoryPanel'
 import AnonymizedPreview from './components/AnonymizedPreview'
 import Toast, { type ToastState } from './components/Toast'
 import TopBar from './components/TopBar'
+import { BlinderMark, DownloadIcon, ShieldIcon, UploadIcon } from './components/icons'
 import StatusStrip from './components/StatusStrip'
 import './App.css'
 
@@ -470,12 +471,6 @@ function App() {
     [history, pendingDeleteId],
   )
   const openFilePicker = () => { if (!isLoading) fileInputRef.current?.click() }
-  const ocrOption = !isLoading && (
-    <label className="ocr-option" title="Для PDF, где текстовый слой поврежден или распознается с ошибками">
-      <input type="checkbox" checked={forceOcr} onChange={(event) => setForceOcr(event.target.checked)} />
-      Распознавать все страницы следующего PDF через OCR
-    </label>
-  )
   const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
   const imageCount = useMemo(() => findImageRanges(sourceText).length, [sourceText])
 
@@ -490,13 +485,28 @@ function App() {
       />
 
       {!hasResult && (
-        <header className="app-header">
-          <h1>MD Blinder</h1>
-          <p>
-            Конвертация договоров (.docx, .pdf) в Markdown с обезличиванием. Все работает в браузере,
-            документы никуда не отправляются. Сканы PDF распознаются через OCR.
-          </p>
-        </header>
+        <>
+          <header className="app-header">
+            <h1 className="app-title"><BlinderMark />MD Blinder</h1>
+            <p>Конвертация договоров (.docx, .pdf) в Markdown с обезличиванием.</p>
+          </header>
+          <ul className="start-facts">
+            <li className="start-fact is-privacy">
+              <ShieldIcon size={18} />
+              <span>
+                <strong>Документы не покидают браузер.</strong> Конвертация, распознавание сканов и поиск
+                персональных данных выполняются на этом компьютере.
+              </span>
+            </li>
+            <li className="start-fact">
+              <DownloadIcon size={18} />
+              <span>
+                <strong>Первый запуск дольше.</strong> Браузер скачает модель распознавания имен (около 580 МБ)
+                и языковые данные для OCR. Это публичные файлы, текст документов не отправляется.
+              </span>
+            </li>
+          </ul>
+        </>
       )}
 
       {!hasResult && (
@@ -517,13 +527,24 @@ function App() {
               }
             }}
           >
-            <p>Перетащите .docx или .pdf файл сюда или нажмите, чтобы выбрать</p>
+            <span className="dropzone-icon" aria-hidden="true"><UploadIcon size={22} /></span>
+            <p className="dropzone-title">Перетащите .docx или .pdf сюда или нажмите, чтобы выбрать</p>
             <p className="dropzone-hint">
               Поддерживаются текстовые и сканированные PDF (распознавание через OCR)
             </p>
             {fileName && <p className="filename">Файл: {fileName}</p>}
           </div>
-          {ocrOption}
+          {!isLoading && (
+            <label className="upload-option">
+              <input type="checkbox" checked={forceOcr} onChange={(event) => setForceOcr(event.target.checked)} />
+              <span>
+                <span className="upload-option-title">Распознать все страницы через OCR</span>
+                <span className="upload-option-hint">
+                  Для сканов и PDF с поврежденным текстовым слоем. Применится к следующему загруженному файлу.
+                </span>
+              </span>
+            </label>
+          )}
         </div>
       )}
 

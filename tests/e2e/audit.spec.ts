@@ -599,3 +599,23 @@ test('the result stands beside the source in a wide window, and the choice survi
   await showResult(page)
   await expect(page.locator('.cm-content')).toBeHidden()
 })
+
+test('the start screen states privacy and the first download, and the OCR option sits in the upload zone', async ({ page }) => {
+  await seed(page, [document('A', 'text')])
+  await expect(page.locator('.start-fact.is-privacy')).toContainText('Документы не покидают браузер')
+  await expect(page.locator('.start-facts')).toContainText('580 МБ')
+  await expect(page.locator('.history-panel')).toContainText('без шифрования')
+
+  let chooserOpened = false
+  page.on('filechooser', () => { chooserOpened = true })
+  const ocr = page.locator('.upload').getByRole('checkbox', { name: /Распознать все страницы через OCR/ })
+  await ocr.check()
+  await expect(ocr).toBeChecked()
+  await page.waitForTimeout(300)
+  expect(chooserOpened).toBe(false)
+
+  // The option is shared with the top bar menu on the document screen.
+  await open(page, 'A')
+  await page.getByRole('button', { name: 'Новый файл', exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })).toBeChecked()
+})

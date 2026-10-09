@@ -56,6 +56,10 @@ export const TableIcon = ({ size }: IconProps) => (
   <Icon size={size}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M10 4v16" /></Icon>
 )
 
+export const ShieldIcon = ({ size }: IconProps) => (
+  <Icon size={size}><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3Z" /><path d="m9 12 2 2 4-4" /></Icon>
+)
+
 // Знак приложения: три полосы разной длины, как зачерненные строки.
 export function BlinderMark() {
   return (

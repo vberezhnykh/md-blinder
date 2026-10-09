@@ -42,6 +42,11 @@ function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, 
         </div>
       </div>
 
+      <p className="history-warning">
+        История хранится в этом браузере вместе с исходным текстом, без шифрования. Экспорт истории тоже
+        содержит исходные данные.
+      </p>
+
       {errorText && <p className="history-error">{errorText}</p>}
 
       {docs.length === 0 ? (
