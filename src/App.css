@@ -1056,49 +1056,42 @@ button.primary:hover:not(:disabled) {
 }
 
 .entity-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px 6px;
-  margin: 0 -6px;
+  list-style: none;
   border-radius: var(--radius-xs);
-  border-bottom: 1px solid var(--line);
   font-size: 13px;
   transition: background-color 0.12s ease;
 }
 
-.entity-row:hover {
-  background: var(--sunk);
-}
-
-/* Группа найденных данных одного типа. Заголовок окрашен тем же цветом, что и
-   подсветка этого типа в тексте, и прилипает к верху панели. Строки группы
-   сдвинуты вправо и связаны линией цвета типа — так видно, что они вложены. */
+/* ── группы найденных данных (EntityList.tsx) ── */
 .entity-group {
-  --group-color: var(--ent-OTHER);
+  padding: 2px 0;
+  border-bottom: 1px solid var(--line);
 }
-
-.entity-group + .entity-group {
-  margin-top: 14px;
-}
+.entity-group:last-of-type { border-bottom: none; }
 
 .entity-group-header {
   position: sticky;
-  top: -14px;
+  top: 30px;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  /* Цвет типа полупрозрачный: подкладываем фон панели, чтобы строки под
-     прилипшим заголовком не просвечивали. */
-  background: linear-gradient(var(--group-color), var(--group-color)), var(--surface);
+  min-height: 40px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface);
 }
 
 .entity-group-header input[type='checkbox'] {
   flex: 0 0 auto;
   margin: 0;
+}
+
+.entity-group-header .type-dot {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+  vertical-align: 0;
 }
 
 .entity-group-toggle {
@@ -1107,7 +1100,8 @@ button.primary:hover:not(:disabled) {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 0;
+  min-height: 36px;
+  padding: 0 4px 0 0;
   border: none;
   background: transparent;
   color: var(--ink);
@@ -1120,71 +1114,36 @@ button.primary:hover:not(:disabled) {
   color: var(--ink);
 }
 
-.entity-group-chevron {
-  width: 10px;
-  color: var(--ink-2);
-  font-size: 12px;
-}
-
 .entity-group-name {
   font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 750;
+  font-size: 12.5px;
+  font-weight: 500;
   letter-spacing: .02em;
 }
 
 .entity-group-count {
-  margin-left: auto;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 20px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+
+.entity-group-chevron {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--ink-3);
+  transition: transform .15s ease;
+}
+.entity-group-chevron.is-collapsed { transform: rotate(-90deg); }
 
 .entity-group-header.is-highlighted {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 .entity-group-items {
-  margin: 4px 0 0 16px;
-  padding-left: 8px;
-  border-left: 2px solid var(--group-color);
+  margin: 0 0 6px;
+  padding: 0;
 }
-
-.entity-group-items .entity-row {
-  margin: 0;
-  padding: 7px 6px;
-}
-
-.entity-group-items .entity-row:last-child {
-  border-bottom: none;
-}
-
-.entity-group-items .entity-row .entity-merge {
-  padding: 2px 4px;
-}
-
-/* Внутри группы тип уже назван в заголовке — выбор типа в строке приглушен
-   и проявляется при наведении. */
-.entity-group-items .entity-row select {
-  /* Ширина по выбранному типу, а не по самому длинному варианту списка. */
-  field-sizing: content;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ink-3);
-}
-
-.entity-group-items .entity-row:hover select,
-.entity-group-items .entity-row select:focus-visible {
-  border-color: var(--line-2);
-  background: var(--surface);
-  color: var(--ink);
-}
-
 
 /* Строка сущности, на которую наведена мышь в редакторе. */
 .entity-row.is-highlighted {
@@ -1192,75 +1151,64 @@ button.primary:hover:not(:disabled) {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
-/* значение и служебная строка — в колонку, чтобы значению доставалась вся ширина */
-.entity-row .entity-main {
+.entity-row.is-selected {
+  background: var(--accent-wash);
+}
+
+.entity-row-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 6px;
+}
+
+.entity-value-button {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--ink);
+  font-weight: 400;
+  text-align: left;
+}
+.entity-value-button:hover:not(:disabled) { background: var(--sunk); border-color: transparent; color: var(--ink); }
+.entity-row.is-selected .entity-value-button:hover:not(:disabled) { background: transparent; }
+
+.entity-row .cell-value {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 500;
 }
-
-.entity-row .entity-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 6px;
-  min-width: 0;
-}
-
-.entity-row .entity-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
+.entity-row .cell-value.is-off {
+  color: var(--ink-3);
+  text-decoration: line-through;
 }
 
 .entity-row .cell-placeholder {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--sunk);
+  color: var(--ink-2);
   font-family: var(--font-mono);
+  font-size: 11.5px;
   white-space: nowrap;
-  flex: 0 0 auto;
-  color: var(--ink-3);
-  background: var(--accent-wash);
-  border-radius: var(--radius-xs);
-  padding: 1px 5px;
-  font-size: 11px;
-  /* Pico стилизует [role="button"] как кнопку — сбрасываем до обычного текста */
-  display: inline-block;
-  width: auto;
-  margin: 0;
-  border: none;
-  line-height: 1.5;
-}
-
-.entity-row select {
-  flex: 0 0 auto;
-  font-size: 12px;
-  padding: 2px 4px;
-}
-
-.entity-row .cell-value {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  min-width: 0;
-  font-size: 13.5px;
-  font-weight: 500;
-  line-height: 1.35;
-  color: var(--ink);
-  overflow-wrap: anywhere;
-  /* сброс Pico для [role="button"] */
-  width: auto;
-  margin: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
 }
 
 .entity-row .cell-count {
   flex: 0 0 auto;
-  color: var(--pico-muted-color);
+  min-width: 22px;
+  text-align: right;
+  color: var(--ink-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -1269,46 +1217,43 @@ button.primary:hover:not(:disabled) {
   content: '×';
 }
 
-.entity-row .entity-delete {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  color: var(--pico-muted-color);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 6px;
-}
-
-.entity-row .entity-delete:hover {
-  color: var(--danger);
-}
-
-.entity-merge-edit {
-  flex: 1 1 auto;
-  min-width: 0;
+.entity-row-actions {
   display: flex;
-  align-items: center;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+  padding: 2px 8px 10px 36px;
 }
 
-.entity-merge-edit .merge-arrow {
+.entity-type-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
   color: var(--ink-3);
 }
 
-.entity-merge-edit .merge-target {
-  flex: 1 1 auto;
+.entity-row select {
+  flex: 0 0 auto;
+  margin: 0;
+  width: auto;
+  padding: 3px 6px;
+  font-size: 12.5px;
+}
+.entity-type-field select { font-family: var(--font-mono); }
+
+.entity-row-actions .merge-target {
+  flex: 1 1 160px;
   min-width: 0;
-  max-width: none;
-  font-size: 12px;
 }
 
 .entity-row .entity-accept,
 .entity-row .entity-merge,
-.entity-row .entity-cancel {
+.entity-row .entity-cancel,
+.entity-row .entity-delete {
   flex: 0 0 auto;
-  font-size: 12px;
-  padding: 2px 8px;
+  padding: 3px 10px;
+  font-size: 12.5px;
   border-radius: var(--radius-xs);
 }
 
@@ -1324,18 +1269,18 @@ button.primary:hover:not(:disabled) {
   color: var(--accent-ink);
 }
 
-.entity-row .entity-merge,
-.entity-row .entity-cancel {
-  background: transparent;
-  border-color: transparent;
-  color: var(--ink-3);
+.entity-row .entity-delete { color: var(--danger); }
+.entity-row .entity-delete:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-wash);
+  color: var(--danger);
 }
 
-.entity-row .entity-merge:hover:not(:disabled),
-.entity-row .entity-cancel:hover:not(:disabled) {
-  background: var(--sunk);
-  border-color: transparent;
-  color: var(--accent);
+.found-hint {
+  margin: 10px 4px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
 }
 
 .collision-notice {
@@ -1456,27 +1401,14 @@ mark.anon-unreplaced {
 /* Neutralize Pico's default spacing on form elements inside our flex rows */
 .view-toggle button,
 .entity-row input,
-.entity-row select,
 .entity-row button {
   margin-bottom: 0;
   width: auto;
 }
 
 .entity-row input[type='checkbox'] {
-  margin-bottom: 0;
-  margin-top: 2px;
-  width: auto;
+  margin: 0;
   flex: 0 0 auto;
-}
-
-.entity-row .cell-value[role='button'] {
-  cursor: pointer;
-}
-
-.entity-row .cell-value[role='button']:hover {
-  color: var(--accent);
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .cm-panels {

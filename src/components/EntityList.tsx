@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
+import { ChevronDownIcon } from './icons'
 
 interface EntityListProps {
   entities: Entity[]
@@ -45,26 +46,6 @@ function TypeSelect({ entity, onChangeType }: { entity: Entity; onChangeType: En
   )
 }
 
-function EntityValue({ entity, value, onSelect }: { entity: Entity; value: string; onSelect?: (entity: Entity) => void }) {
-  return (
-    <span
-      className="cell-value"
-      title={`${value}\n(показать в тексте)`}
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect?.(entity)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSelect?.(entity)
-        }
-      }}
-    >
-      {value}
-    </span>
-  )
-}
-
 function EntityList({
   entities,
   sourceText,
@@ -82,6 +63,8 @@ function EntityList({
 }: EntityListProps) {
   const paneRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState<ReadonlySet<EntityType>>(new Set())
+  // Выбранная строка показывает действия: тип, объединение, удаление.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [mergeSource, setMergeSource] = useState<string | null>(null)
   const [mergeTarget, setMergeTarget] = useState('')
   const { confirmed, byType } = useMemo(() => {
@@ -194,11 +177,7 @@ function EntityList({
           const isCollapsed = collapsed.has(type)
           const groupHighlighted = isCollapsed && items.some((e) => e.id === highlightedId)
           return (
-            <section
-              className="entity-group"
-              key={type}
-              style={{ '--group-color': `var(--ent-${type})` } as CSSProperties}
-            >
+            <section className="entity-group" key={type}>
               <div
                 className={`entity-group-header${groupHighlighted ? ' is-highlighted' : ''}`}
                 data-group-type={type}
@@ -211,6 +190,8 @@ function EntityList({
                   title="Заменять все значения этого типа"
                   aria-label={`Заменять все ${type}`}
                 />
+                {/* Цвет подсветки полупрозрачный; точке нужен тот же тон без прозрачности. */}
+                <span className="type-dot" style={{ background: `rgb(from var(--ent-${type}) r g b / 1)` }} aria-hidden="true" />
                 <button
                   type="button"
                   className="entity-group-toggle"
@@ -222,121 +203,143 @@ function EntityList({
                     return next
                   })}
                 >
-                  <span className="entity-group-chevron" aria-hidden="true">{isCollapsed ? '▸' : '▾'}</span>
                   <span className="entity-group-name">{type}</span>
                   <span className="entity-group-count">
                     {active === items.length ? items.length : `${active} из ${items.length}`}
                   </span>
+                  <span className={`entity-group-chevron${isCollapsed ? ' is-collapsed' : ''}`}><ChevronDownIcon size={16} /></span>
                 </button>
               </div>
-              {!isCollapsed && <div className="entity-group-items">{items.map((entity) => {
-                const value = entityCurrentValue(sourceText, entity)
-                const sameType = byType.get(entity.type)!
-                const canMerge = sameType.length >= 2 && !!onMergeEntity
-                const isMerging = mergeSource === entity.id
-                return (
-                  <div
-                    className={`entity-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
-                    key={entity.id}
-                    data-entity-id={entity.id}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={entity.anonymize}
-                      onChange={() => onToggle(entity.id)}
-                      title="Заменять в итоговом тексте"
-                      aria-label={`Заменять «${truncate(value, 40)}»`}
-                    />
-                    {isMerging ? (
-                      <div className="entity-merge-edit">
-                        <span className="cell-placeholder">{entity.placeholder}</span>
-                        <span className="merge-arrow">→</span>
-                        <select
-                          className="merge-target"
-                          aria-label="Объединить с"
-                          value={mergeTarget}
-                          onChange={(e) => setMergeTarget(e.target.value)}
-                        >
-                          <option value="">объединить с…</option>
-                          {sameType
-                            .filter((t) => t.id !== entity.id)
-                            .map((t) => (
-                              <option key={t.id} value={t.id}>
-                                {t.placeholder} · {truncate(entityCurrentValue(sourceText, t), 24)}
-                              </option>
-                            ))}
-                        </select>
-                        <button
-                          type="button"
-                          className="entity-accept"
-                          title="Объединить"
-                          disabled={!mergeTarget}
-                          onClick={() => {
-                            onMergeEntity?.(entity.id, mergeTarget)
-                            setMergeSource(null)
-                            setMergeTarget('')
-                          }}
-                        >
-                          Объединить
-                        </button>
-                        <button
-                          type="button"
-                          className="entity-cancel"
-                          onClick={() => {
-                            setMergeSource(null)
-                            setMergeTarget('')
-                          }}
-                        >
-                          Отмена
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="entity-main">
-                          <EntityValue entity={entity} value={value} onSelect={onSelect} />
-                          <div className="entity-meta">
-                            <span className="cell-placeholder" title={entity.placeholder}>
-                              {entity.placeholder}
-                            </span>
-                            <TypeSelect entity={entity} onChangeType={onChangeType} />
-                            {/* «×» рисуется через ::before — e2e читают отсюда голое число */}
-                            <span className="cell-count" title="Вхождений в тексте">
-                              {entity.positions.length}
-                            </span>
-                            {canMerge && (
-                              <button
-                                type="button"
-                                className="entity-merge"
-                                title="Объединить с другой заменой того же типа"
-                                onClick={() => {
-                                  setMergeSource(entity.id)
-                                  setMergeTarget('')
-                                }}
-                              >
-                                Объединить
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <div className="entity-actions">
+              {!isCollapsed && (
+                <ul className="entity-group-items">
+                  {items.map((entity) => {
+                    const value = entityCurrentValue(sourceText, entity)
+                    const sameType = byType.get(entity.type)!
+                    const canMerge = sameType.length >= 2 && !!onMergeEntity
+                    const isSelected = selectedId === entity.id
+                    const isMerging = mergeSource === entity.id
+                    return (
+                      <li
+                        className={`entity-row${entity.id === highlightedId ? ' is-highlighted' : ''}${isSelected ? ' is-selected' : ''}`}
+                        key={entity.id}
+                        data-entity-id={entity.id}
+                      >
+                        <div className="entity-row-line">
+                          <input
+                            type="checkbox"
+                            checked={entity.anonymize}
+                            onChange={() => onToggle(entity.id)}
+                            title="Заменять в итоговом тексте"
+                            aria-label={`Заменять «${truncate(value, 40)}»`}
+                          />
                           <button
                             type="button"
-                            className="entity-delete"
-                            onClick={() => onDelete(entity.id)}
-                            title="Удалить"
-                            aria-label={`Удалить «${truncate(value, 40)}»`}
+                            className="entity-value-button"
+                            aria-expanded={isSelected}
+                            title="Показать в тексте"
+                            onClick={() => {
+                              setMergeSource(null)
+                              setMergeTarget('')
+                              if (isSelected) {
+                                setSelectedId(null)
+                                return
+                              }
+                              setSelectedId(entity.id)
+                              onSelect?.(entity)
+                            }}
                           >
-                            ✕
+                            <span className={`cell-value${entity.anonymize ? '' : ' is-off'}`}>{value}</span>
+                            <span className="cell-placeholder">{entity.placeholder}</span>
+                            {/* «×» рисуется через ::before — e2e читают отсюда голое число */}
+                            <span className="cell-count" title="Вхождений в тексте">{entity.positions.length}</span>
                           </button>
                         </div>
-                      </>
-                    )}
-                  </div>
-                )
-              })}</div>}
+                        {isSelected && (
+                          <div className="entity-row-actions">
+                            {isMerging ? (
+                              <>
+                                <select
+                                  className="merge-target"
+                                  aria-label="Объединить с"
+                                  value={mergeTarget}
+                                  onChange={(e) => setMergeTarget(e.target.value)}
+                                >
+                                  <option value="">объединить с…</option>
+                                  {sameType
+                                    .filter((t) => t.id !== entity.id)
+                                    .map((t) => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.placeholder} · {truncate(entityCurrentValue(sourceText, t), 24)}
+                                      </option>
+                                    ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  className="entity-accept"
+                                  disabled={!mergeTarget}
+                                  onClick={() => {
+                                    onMergeEntity?.(entity.id, mergeTarget)
+                                    setMergeSource(null)
+                                    setMergeTarget('')
+                                    setSelectedId(null)
+                                  }}
+                                >
+                                  Объединить
+                                </button>
+                                <button
+                                  type="button"
+                                  className="entity-cancel"
+                                  onClick={() => {
+                                    setMergeSource(null)
+                                    setMergeTarget('')
+                                  }}
+                                >
+                                  Отмена
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <label className="entity-type-field">
+                                  Тип
+                                  <TypeSelect entity={entity} onChangeType={onChangeType} />
+                                </label>
+                                {canMerge && (
+                                  <button
+                                    type="button"
+                                    className="entity-merge"
+                                    title="Объединить с другой заменой того же типа"
+                                    onClick={() => {
+                                      setMergeSource(entity.id)
+                                      setMergeTarget('')
+                                    }}
+                                  >
+                                    Объединить…
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="entity-delete"
+                                  onClick={() => {
+                                    setSelectedId(null)
+                                    onDelete(entity.id)
+                                  }}
+                                  aria-label={`Удалить «${truncate(value, 40)}»`}
+                                >
+                                  Удалить
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </section>
           )
         })}
+        {confirmed.length > 0 && <p className="found-hint">Нажмите на значение, чтобы найти его в тексте и открыть действия.</p>}
         </div>
       )}
     </div>

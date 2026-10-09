@@ -507,3 +507,39 @@ test('the review queue walks candidates with buttons and keys, rejects, restores
   await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
   await expect(page.locator('.anonymized-preview')).toHaveText('[PERSON_1] signed. [PERSON_1] agreed. [PERSON_1] left. [PERSON_2] came.')
 })
+
+test('a found value opens its actions on click and can be merged and deleted from there', async ({ page }) => {
+  const text = 'Alex met Bob'
+  const entity = (id: string, value: string, placeholder: string): Entity => {
+    const start = text.indexOf(value)
+    return { id, type: 'PERSON', value, placeholder, positions: [{ start, end: start + value.length }], anonymize: true, manual: false }
+  }
+  await seed(page, [document('A', text, [entity('alex', 'Alex', '[PERSON_1]'), entity('bob', 'Bob', '[PERSON_2]')])])
+  await open(page, 'A')
+  await expect(page.getByRole('tab', { name: /Найденные данные/ })).toHaveAttribute('aria-selected', 'true')
+  const alexRow = page.locator('.entity-row').filter({ hasText: 'Alex' })
+  await expect(page.locator('.entity-row-actions')).toHaveCount(0)
+
+  await alexRow.locator('.entity-value-button').click()
+  await expect(alexRow).toHaveClass(/is-selected/)
+  await expect(alexRow.getByRole('button', { name: 'Удалить «Alex»' })).toBeVisible()
+  await alexRow.locator('.entity-value-button').click()
+  await expect(page.locator('.entity-row-actions')).toHaveCount(0)
+
+  await alexRow.locator('.entity-value-button').click()
+  await alexRow.getByRole('button', { name: 'Объединить…' }).click()
+  await alexRow.getByLabel('Объединить с').selectOption({ label: '[PERSON_2] · Bob' })
+  await alexRow.getByRole('button', { name: 'Объединить', exact: true }).click()
+  await expect(page.locator('.entity-row')).toHaveCount(1)
+  await expect(page.locator('.entity-row .cell-count')).toHaveText('2')
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('[PERSON_1] met [PERSON_1]')
+  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+
+  const row = page.locator('.entity-row')
+  await row.locator('.entity-value-button').click()
+  await row.getByRole('button', { name: /^Удалить/ }).click()
+  await expect(page.locator('.entity-row')).toHaveCount(0)
+  // Without any replacement the view toggle is hidden; the summary reports it.
+  await expect(page.locator('.status-summary')).toHaveText('Замен пока нет')
+})

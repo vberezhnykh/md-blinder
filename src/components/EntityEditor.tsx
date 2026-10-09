@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { basicSetup, EditorView } from 'codemirror'
 import { markdown } from '@codemirror/lang-markdown'
 import { Decoration, type DecorationSet, WidgetType } from '@codemirror/view'
-import { StateEffect, StateField } from '@codemirror/state'
+import { Annotation, StateEffect, StateField } from '@codemirror/state'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags } from '@lezer/highlight'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
@@ -65,6 +65,11 @@ const activeSpanField = StateField.define<ActiveSpan | null>({
     return active
   },
 })
+
+// Выделение, которое поставил reveal (переход к значению из списка): оно
+// показывает, где значение в тексте, и не открывает окно «Добавить», которое
+// перекрыло бы действия строки в панели.
+const revealSelection = Annotation.define<boolean>()
 
 const setCurrentCandidateEffect = StateEffect.define<string | null>()
 
@@ -309,7 +314,8 @@ function EntityEditor({
             }
           }
         } else {
-          const coords = update.view.coordsAtPos(sel.to)
+          const revealed = update.transactions.some((tr) => tr.annotation(revealSelection))
+          const coords = revealed ? null : update.view.coordsAtPos(sel.to)
           setSelectionPopup(
             coords ? { from: sel.from, to: sel.to, left: coords.left, top: coords.bottom + 6 } : null,
           )
@@ -547,6 +553,7 @@ function EntityEditor({
     view.dispatch({
       selection: { anchor, head },
       effects: EditorView.scrollIntoView(anchor, { y: 'center' }),
+      annotations: revealSelection.of(true),
     })
     view.focus()
   }, [reveal])
