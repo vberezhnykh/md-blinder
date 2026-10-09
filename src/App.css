@@ -260,7 +260,7 @@ button.primary:hover:not(:disabled) {
   width: 100%;
   min-height: 420px;
   margin-top: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.5;
   padding: 16px;
@@ -370,7 +370,7 @@ button.primary:hover:not(:disabled) {
 }
 
 .replacement-table .cell-placeholder {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 
@@ -557,24 +557,6 @@ button.primary:hover:not(:disabled) {
   --ent-PHONE: rgba(138, 109, 59, 0.34);
   --ent-URL: rgba(122, 150, 0, 0.32);
   --ent-OTHER: rgba(110, 118, 135, 0.30);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ent-PERSON: rgba(57, 135, 229, 0.45);
-    --ent-COMPANY: rgba(201, 133, 0, 0.48);
-    --ent-ADDRESS: rgba(47, 170, 47, 0.45);
-    --ent-REG_NUMBER: rgba(144, 133, 233, 0.45);
-    --ent-ID_DOC: rgba(196, 92, 214, 0.45);
-    --ent-IBAN: rgba(25, 158, 112, 0.45);
-    --ent-SWIFT: rgba(213, 81, 129, 0.45);
-    --ent-ACCOUNT: rgba(217, 89, 38, 0.45);
-    --ent-CARD: rgba(230, 103, 103, 0.45);
-    --ent-EMAIL: rgba(57, 167, 194, 0.45);
-    --ent-PHONE: rgba(176, 141, 79, 0.48);
-    --ent-URL: rgba(143, 170, 30, 0.45);
-    --ent-OTHER: rgba(148, 156, 173, 0.45);
-  }
 }
 
 .cm-entity-PERSON { background-color: var(--ent-PERSON); }

@@ -136,9 +136,8 @@ const entityDecorationField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 })
 
-// Цвета берутся из токенов приложения, поэтому одна тема работает и в светлом,
-// и в темном режиме. Базовая тема CodeMirror светлая: без этих правил нумерация
-// строк, активная строка и подсказки оставались светлыми на темном фоне.
+// Цвета и шрифт берутся из токенов приложения, чтобы редактор не расходился
+// с остальным интерфейсом.
 const editorTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
@@ -146,7 +145,7 @@ const editorTheme = EditorView.theme({
     fontSize: '13px',
   },
   '.cm-content': {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontFamily: 'var(--font-mono)',
     padding: '16px',
     caretColor: 'var(--ink)',
   },
