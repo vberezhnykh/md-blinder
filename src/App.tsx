@@ -19,6 +19,7 @@ import EntityList from './components/EntityList'
 import HistoryPanel from './components/HistoryPanel'
 import AnonymizedPreview from './components/AnonymizedPreview'
 import Toast, { type ToastState } from './components/Toast'
+import TopBar from './components/TopBar'
 import './App.css'
 
 const EntityEditor = lazy(() => import('./components/EntityEditor'))
@@ -308,7 +309,12 @@ function App() {
     e.target.value = ''
   }
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
+    e.preventDefault()
+    if (!isLoading) setIsDragging(true)
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLElement>) => {
     e.preventDefault()
     setIsDragging(false)
     if (isLoading) return
@@ -456,10 +462,7 @@ function App() {
             role="button"
             tabIndex={isLoading ? -1 : 0}
             aria-disabled={isLoading}
-            onDragOver={(e) => {
-              e.preventDefault()
-              if (!isLoading) setIsDragging(true)
-            }}
+            onDragOver={handleDragOver}
             onDragLeave={() => setIsDragging(false)}
             onDrop={handleDrop}
             onClick={openFilePicker}
@@ -505,28 +508,24 @@ function App() {
       )}
 
       {hasResult && (
-        <div
-          className={`compact-bar ${isDragging ? 'dragging' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            if (!isLoading) setIsDragging(true)
-          }}
+        <TopBar
+          fileName={fileName}
+          saveState={historyError ? 'error' : saving ? 'saving' : 'saved'}
+          isLoading={isLoading}
+          isDragging={isDragging}
+          onDragOver={handleDragOver}
           onDragLeave={() => setIsDragging(false)}
           onDrop={handleDrop}
-        >
-          <span className="brand">MD Blinder</span>
-          {fileName && <span className="filename-compact" title={fileName}>{fileName}</span>}
-          <span className="save-status" role="status">{historyError ? 'Ошибка сохранения' : saving ? 'Сохранение…' : 'Сохранено в браузере'}</span>
-          {ocrOption}
-          <button type="button" onClick={openFilePicker}>
-            Загрузить другой файл
-          </button>
-          <button type="button" onClick={() => {
-            void flush().then(() => setHasResult(false)).catch(() => {})
-          }}>
-            История
-          </button>
-        </div>
+          forceOcr={forceOcr}
+          onForceOcrChange={setForceOcr}
+          onPickFile={openFilePicker}
+          historyDocs={visibleHistory}
+          currentDocId={currentDocId}
+          onOpenDoc={(doc) => { void handleOpenDoc(doc) }}
+          onShowAllDocs={() => { void flush().then(() => setHasResult(false)).catch(() => {}) }}
+          onExportHistory={() => { void handleExportHistory() }}
+          onImportHistory={(file) => { void handleImportHistory(file) }}
+        />
       )}
 
       {hasResult && historyError && <p className="status error" role="alert">

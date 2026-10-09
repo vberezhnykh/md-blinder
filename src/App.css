@@ -62,61 +62,177 @@
   color: var(--pico-muted-color);
 }
 
-.compact-bar {
+.topbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  padding: 9px 12px;
+  gap: 8px 14px;
+  padding: 8px 10px 8px 14px;
   margin-top: 24px;
   margin-bottom: 16px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
 
-.compact-bar.dragging {
-  border-color: var(--pico-primary);
-  background: var(--pico-primary-background, rgba(0, 0, 0, 0.03));
+.topbar.dragging {
+  border-color: var(--accent);
+  background: var(--accent-wash);
 }
 
-.compact-bar .brand {
-  font-weight: 780;
-  letter-spacing: -.02em;
+.topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  font-size: 15px;
+  letter-spacing: -.01em;
   white-space: nowrap;
-  padding-right: 12px;
-  border-right: 1px solid var(--line);
 }
 
-.compact-bar .filename-compact {
-  flex: 1 1 12rem;
+.blinder-mark { fill: var(--ink); flex: none; }
+
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.topbar-doc {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.topbar-filename {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink);
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 550;
+  font-size: 15px;
 }
 
-.compact-bar .save-status {
-  font-size: 12px;
+.topbar-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
   color: var(--ink-3);
   white-space: nowrap;
 }
+.topbar-save.is-saved { color: var(--good); }
+.topbar-save.is-error { color: var(--danger); }
 
-.compact-bar .ocr-option {
-  margin: 0;
-  color: var(--ink-2);
+.topbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.compact-bar button {
-  flex: 0 0 auto;
-  margin: 0;
-  width: auto;
-  padding: 6px 12px;
-  font-size: 14px;
+/* ── раскрывающееся меню (Menu.tsx) ── */
+.menu {
+  position: relative;
+}
+
+.menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.menu-button .icon { flex: none; }
+.menu-button[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+
+.menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 30;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+}
+.menu-panel-end { right: 0; }
+.menu-panel-start { left: 0; }
+.menu-panel-wide { width: 340px; }
+
+.menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  text-align: left;
+  font-weight: 400;
+}
+.menu-item:hover:not(:disabled) { background: var(--sunk); border-color: transparent; color: var(--ink); }
+.menu-item.is-current { background: var(--sunk); }
+
+.menu-item-title {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.menu-item-hint {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+  white-space: normal;
+}
+
+.menu-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  font-size: .875rem;
+  cursor: pointer;
+}
+.menu-check input { margin-top: 3px; flex: none; }
+.menu-check .menu-item-title { white-space: normal; }
+
+.menu-separator {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--line);
+}
+
+.menu-note {
+  margin: 4px 10px 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.menu-note-warn { color: var(--warn); }
+
+.menu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 6px 4px;
+}
+
+.menu-small {
+  padding: 4px 10px;
+  font-size: 13px;
 }
 
 .history-panel { margin-top: 24px; }

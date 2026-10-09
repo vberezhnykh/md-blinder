@@ -65,6 +65,7 @@ async function downloadedText(download: Download) {
 
 async function history(page: Page) {
   await page.getByRole('button', { name: 'История', exact: true }).click()
+  await page.getByRole('button', { name: 'Все документы', exact: true }).click()
   await expect(page.locator('.history-panel')).toBeVisible()
 }
 
@@ -139,7 +140,7 @@ test('hovering an entity in the editor highlights its row in the entity list', a
   await page.locator('.cm-entity', { hasText: 'Alex' }).hover()
   await expect(rows.filter({ hasText: '[PERSON_1]' })).toHaveClass(/is-highlighted/)
   await expect(rows.filter({ hasText: '[EMAIL_1]' })).not.toHaveClass(/is-highlighted/)
-  await page.locator('.compact-bar').hover()
+  await page.locator('.topbar').hover()
   await expect(page.locator('.entity-row.is-highlighted')).toHaveCount(0)
 })
 
@@ -311,7 +312,7 @@ test('importing a newer revision of the current document updates the reopened ed
   await expect.poll(async () => (await readSaved(page, 'A'))?.sourceText).toBe(revisedText)
   await expect(page.locator('.history-row')).toHaveCount(1)
   await page.locator('.history-row').filter({ hasText: incoming.name }).locator('button').first().click()
-  await expect(page.locator('.filename-compact')).toHaveText(incoming.name)
+  await expect(page.locator('.topbar-filename')).toHaveText(incoming.name)
   await expect(page.locator('.cm-content')).toHaveText(revisedText)
   await expect(page.locator('.cm-entity-OTHER')).toHaveText('Alex')
   await expect(page.locator('.entity-row .cell-placeholder')).toHaveText('[OTHER_1]')
@@ -341,4 +342,38 @@ test('embedded image payloads are removed from preview, clipboard and downloaded
   await page.getByRole('button', { name: 'Экспортировать .md', exact: true }).click()
   expect(await downloadedText(await downloadPromise)).toBe(expected)
   expect((await readSaved(page, 'images'))?.sourceText).toBe(source)
+})
+
+test('the top bar menus open documents and hold the OCR option for the next file', async ({ page }) => {
+  await seed(page, [document('A', 'first document'), document('B', 'second document')])
+  await open(page, 'A')
+  await expect(page.locator('.topbar-filename')).toHaveText('Synthetic A.docx')
+
+  const historyButton = page.getByRole('button', { name: 'История', exact: true })
+  await historyButton.click()
+  await expect(historyButton).toHaveAttribute('aria-expanded', 'true')
+  const menu = page.locator('.menu-panel')
+  await expect(menu).toContainText('без шифрования')
+  await expect(menu.getByRole('button', { name: /Synthetic A\.docx/ })).toContainText('Открыт сейчас')
+  await menu.getByRole('button', { name: /Synthetic B\.docx/ }).click()
+  await expect(page.locator('.menu-panel')).toHaveCount(0)
+  await expect(page.locator('.topbar-filename')).toHaveText('Synthetic B.docx')
+  await expect(page.locator('.cm-content')).toHaveText('second document')
+
+  // Escape closes the menu and returns focus to its button.
+  await historyButton.click()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.menu-panel')).toHaveCount(0)
+  await expect(historyButton).toBeFocused()
+
+  // A click outside closes the menu as well.
+  const newFileButton = page.getByRole('button', { name: 'Новый файл', exact: true })
+  await newFileButton.click()
+  const ocr = page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })
+  await expect(ocr).not.toBeChecked()
+  await ocr.check()
+  await page.locator('.cm-content').click()
+  await expect(page.locator('.menu-panel')).toHaveCount(0)
+  await newFileButton.click()
+  await expect(page.getByRole('checkbox', { name: /Распознать все страницы через OCR/ })).toBeChecked()
 })
