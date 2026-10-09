@@ -548,12 +548,14 @@ button.primary:hover:not(:disabled) {
   --ent-COMPANY: rgba(237, 161, 0, 0.30);
   --ent-ADDRESS: rgba(0, 131, 0, 0.30);
   --ent-REG_NUMBER: rgba(74, 58, 167, 0.32);
+  --ent-ID_DOC: rgba(176, 52, 196, 0.26);
   --ent-IBAN: rgba(27, 175, 122, 0.30);
   --ent-SWIFT: rgba(232, 123, 164, 0.34);
   --ent-ACCOUNT: rgba(235, 104, 52, 0.30);
   --ent-CARD: rgba(227, 73, 72, 0.30);
   --ent-EMAIL: rgba(14, 155, 184, 0.30);
   --ent-PHONE: rgba(138, 109, 59, 0.34);
+  --ent-URL: rgba(122, 150, 0, 0.32);
   --ent-OTHER: rgba(110, 118, 135, 0.30);
 }
 
@@ -563,12 +565,14 @@ button.primary:hover:not(:disabled) {
     --ent-COMPANY: rgba(201, 133, 0, 0.48);
     --ent-ADDRESS: rgba(47, 170, 47, 0.45);
     --ent-REG_NUMBER: rgba(144, 133, 233, 0.45);
+    --ent-ID_DOC: rgba(196, 92, 214, 0.45);
     --ent-IBAN: rgba(25, 158, 112, 0.45);
     --ent-SWIFT: rgba(213, 81, 129, 0.45);
     --ent-ACCOUNT: rgba(217, 89, 38, 0.45);
     --ent-CARD: rgba(230, 103, 103, 0.45);
     --ent-EMAIL: rgba(57, 167, 194, 0.45);
     --ent-PHONE: rgba(176, 141, 79, 0.48);
+    --ent-URL: rgba(143, 170, 30, 0.45);
     --ent-OTHER: rgba(148, 156, 173, 0.45);
   }
 }
@@ -577,12 +581,14 @@ button.primary:hover:not(:disabled) {
 .cm-entity-COMPANY { background-color: var(--ent-COMPANY); }
 .cm-entity-ADDRESS { background-color: var(--ent-ADDRESS); }
 .cm-entity-REG_NUMBER { background-color: var(--ent-REG_NUMBER); }
+.cm-entity-ID_DOC { background-color: var(--ent-ID_DOC); }
 .cm-entity-IBAN { background-color: var(--ent-IBAN); }
 .cm-entity-SWIFT { background-color: var(--ent-SWIFT); }
 .cm-entity-ACCOUNT { background-color: var(--ent-ACCOUNT); }
 .cm-entity-CARD { background-color: var(--ent-CARD); }
 .cm-entity-EMAIL { background-color: var(--ent-EMAIL); }
 .cm-entity-PHONE { background-color: var(--ent-PHONE); }
+.cm-entity-URL { background-color: var(--ent-URL); }
 .cm-entity-OTHER { background-color: var(--ent-OTHER); }
 
 .cm-entity-inactive {
