@@ -129,6 +129,14 @@ describe('sanitizeEntities', () => {
     expect(result[0].score).toBe(0.2)
   })
 
+  it('preserves relatedTo and drops it when it is not a string', () => {
+    const result = sanitizeEntities([
+      makeEntity({ id: 'related', candidate: true, relatedTo: 'person-1', anonymize: false }),
+      { ...makeEntity({ id: 'broken', candidate: true, anonymize: false }), relatedTo: 42 },
+    ])
+    expect(result.map((e) => e.relatedTo)).toEqual(['person-1', undefined])
+  })
+
   it('keeps only the valid positions of an otherwise-valid entity', () => {
     const raw = [
       {

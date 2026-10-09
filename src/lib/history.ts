@@ -178,6 +178,7 @@ export function sanitizeEntities(raw: unknown, sourceLength = Infinity): Entity[
     if (typeof e.score === 'number') out.score = e.score
     if (e.candidate === true) out.candidate = true
     if (typeof e.candidateNote === 'string') out.candidateNote = e.candidateNote
+    if (typeof e.relatedTo === 'string') out.relatedTo = e.relatedTo
     if (e.dismissed === true) out.dismissed = true
     result.push(out)
   }

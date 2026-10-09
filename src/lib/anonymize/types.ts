@@ -38,6 +38,7 @@ export interface Entity {
   score?: number          // уверенность NER репрезентативного матча (undefined для структурных/ручных)
   candidate?: boolean     // true = непроверенный кандидат «серой зоны»; не идёт в вывод, пока не принят
   candidateNote?: string  // причина попадания в кандидаты, показывается в UI
+  relatedTo?: string      // id сущности, на которую похож кандидат (findRelatedOccurrences); причина «Похоже на [X]» вычисляется по нему
   dismissed?: boolean     // true = кандидат отклонён вручную; скрыт из UI
 }
 

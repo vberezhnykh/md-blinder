@@ -3,7 +3,7 @@ import { detectFileKind } from './lib/fileType'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
-import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptCandidate, mergeEntities } from './lib/anonymize/apply'
+import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptRelatedCandidate, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { findImageRanges } from './lib/anonymize/imageSafety'
 import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
@@ -384,7 +384,7 @@ function App() {
   }, [setEntities])
 
   const handleAcceptCandidate = useCallback((id: string) => {
-    setEntities((prev) => acceptCandidate(prev, id))
+    setEntities((prev) => compactPlaceholderNumbers(acceptRelatedCandidate(prev, id)))
   }, [setEntities])
 
   const handleRejectCandidate = useCallback((id: string) => {

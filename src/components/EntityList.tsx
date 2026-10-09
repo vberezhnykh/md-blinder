@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { entityCurrentValue } from '../lib/anonymize/apply'
+import { candidateReason, entityCurrentValue } from '../lib/anonymize/apply'
 import { ALL_ENTITY_TYPES, type Entity, type EntityType } from '../lib/anonymize/types'
 
 interface EntityListProps {
@@ -173,6 +173,7 @@ function EntityList({
           <p className="candidates-hint">Эти фрагменты пока не заменяются. Примите или отклоните каждый.</p>
           {candidates.map((entity) => {
             const value = entityCurrentValue(sourceText, entity)
+            const reason = candidateReason(entities, entity)
             return (
               <div
                 className={`entity-row candidate-row${entity.id === highlightedId ? ' is-highlighted' : ''}`}
@@ -182,7 +183,7 @@ function EntityList({
                 <TypeDot type={entity.type} />
                 <div className="entity-main">
                   <EntityValue entity={entity} value={value} onSelect={onSelect} />
-                  {entity.candidateNote && <span className="candidate-note">{entity.candidateNote}</span>}
+                  {reason && <span className="candidate-note">{reason}</span>}
                   <div className="entity-meta">
                     <TypeSelect entity={entity} onChangeType={onChangeType} />
                     <button

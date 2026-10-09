@@ -412,3 +412,35 @@ test('the status strip follows the review and the export menu holds the replacem
   await expect(page.locator('.status-steps [aria-current="step"] .status-step-label')).toHaveText('Выдача')
   await expect(page.locator('.status-summary')).toHaveText('Заменено 2 значения в 2 местах')
 })
+
+test('accepting a related candidate merges it into the original placeholder and undo restores it', async ({ page }) => {
+  const text = 'Signed by Alex Smith. Smith agreed.'
+  const full = text.indexOf('Alex Smith')
+  const short = text.indexOf('Smith agreed')
+  const original: Entity = {
+    id: 'person-smith', type: 'PERSON', value: 'Alex Smith', placeholder: '[PERSON_1]',
+    positions: [{ start: full, end: full + 10 }], anonymize: true, manual: false,
+  }
+  const candidate: Entity = {
+    id: 'smith-candidate', type: 'PERSON', value: 'Smith', placeholder: '[PERSON_2]',
+    positions: [{ start: short, end: short + 5 }], anonymize: false, manual: false,
+    candidate: true, relatedTo: 'person-smith',
+  }
+  await seed(page, [document('A', text, [original, candidate])])
+  await open(page, 'A')
+  await expect(page.locator('.candidate-row .candidate-note')).toHaveText('Похоже на [PERSON_1]')
+
+  await page.locator('.candidate-row').getByTitle('Принять', { exact: true }).click()
+  await expect(page.locator('.candidate-row')).toHaveCount(0)
+  await expect(page.locator('.entity-row')).toHaveCount(1)
+  await expect(page.locator('.entity-row .cell-count')).toHaveText('2')
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('Signed by [PERSON_1]. [PERSON_1] agreed.')
+  await page.getByRole('button', { name: 'Редактор', exact: true }).click()
+
+  await page.locator('.cm-content').press('Control+z')
+  await expect(page.locator('.candidate-row')).toHaveCount(1)
+  await expect(page.locator('.entity-row:not(.candidate-row) .cell-count')).toHaveText('1')
+  await page.getByRole('button', { name: 'Анонимизированный', exact: true }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('Signed by [PERSON_1]. Smith agreed.')
+})

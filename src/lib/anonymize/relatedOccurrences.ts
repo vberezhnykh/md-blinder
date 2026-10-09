@@ -6,8 +6,10 @@ import type { Entity } from './types'
 // B3: поиск «родственных» вхождений подтверждённых сущностей — недетектированных
 // форм того же ПД (фамилия без имени, инициалы+фамилия, косвенные падежи для
 // кириллицы, название компании без ОПФ/аббревиатура, переформатированные
-// email/телефон). Всё найденное уходит в «серую зону» (B1) как кандидат с
-// пометкой «Похоже на [PLACEHOLDER]». Ничего не анонимизируется автоматически.
+// email/телефон). Всё найденное уходит в «серую зону» (B1) как кандидат со
+// ссылкой relatedTo на исходную сущность; причина «Похоже на [PLACEHOLDER]»
+// вычисляется при показе (candidateReason), чтобы метка не устаревала после
+// перенумерации. Ничего не анонимизируется автоматически.
 
 const LEGAL_FORMS = new Set([
   'ltd', 'limited', 'llc', 'llp', 'inc', 'incorporated', 'plc', 'corp',
@@ -150,7 +152,7 @@ export function findRelatedOccurrences(sourceText: string, entities: Entity[]): 
 
   interface G {
     type: Entity['type']
-    note: string
+    relatedTo: string
     firstValue: string
     firstStart: number
     positions: { start: number; end: number }[]
@@ -174,7 +176,7 @@ export function findRelatedOccurrences(sourceText: string, entities: Entity[]): 
         const key = `${src.type} ${normalizeValue(src.type, text)}`
         let g = groups.get(key)
         if (!g) {
-          g = { type: src.type, note: `Похоже на ${src.placeholder}`, firstValue: text, firstStart: start, positions: [] }
+          g = { type: src.type, relatedTo: src.id, firstValue: text, firstStart: start, positions: [] }
           groups.set(key, g)
         }
         g.positions.push({ start, end })
@@ -195,7 +197,7 @@ export function findRelatedOccurrences(sourceText: string, entities: Entity[]): 
       anonymize: false,
       manual: false,
       candidate: true,
-      candidateNote: g.note,
+      relatedTo: g.relatedTo,
     }
     working.push(entity)
     result.push(entity)

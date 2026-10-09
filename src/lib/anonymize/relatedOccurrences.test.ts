@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { findRelatedOccurrences } from './relatedOccurrences'
+import { candidateReason } from './apply'
 import type { Entity } from './types'
 
 function makeEntity(overrides: Partial<Entity> & Pick<Entity, 'type' | 'value' | 'placeholder' | 'positions'>): Entity {
@@ -36,7 +37,9 @@ describe('findRelatedOccurrences', () => {
     for (const candidate of [surnameOnly, initialsForm]) {
       expect(candidate!.candidate).toBe(true)
       expect(candidate!.anonymize).toBe(false)
-      expect(candidate!.candidateNote).toBe('Похоже на [PERSON_1]')
+      expect(candidate!.relatedTo).toBe(entity.id)
+      expect(candidate!.candidateNote).toBeUndefined()
+      expect(candidateReason([entity, ...result], candidate!)).toBe('Похоже на [PERSON_1]')
       for (const pos of candidate!.positions) {
         expect(sourceText.slice(pos.start, pos.end)).toBe(candidate!.value)
       }
@@ -65,7 +68,9 @@ describe('findRelatedOccurrences', () => {
     for (const candidate of [shortName, acronym]) {
       expect(candidate!.candidate).toBe(true)
       expect(candidate!.anonymize).toBe(false)
-      expect(candidate!.candidateNote).toBe('Похоже на [COMPANY_1]')
+      expect(candidate!.relatedTo).toBe(entity.id)
+      expect(candidate!.candidateNote).toBeUndefined()
+      expect(candidateReason([entity, ...result], candidate!)).toBe('Похоже на [COMPANY_1]')
       for (const pos of candidate!.positions) {
         expect(sourceText.slice(pos.start, pos.end)).toBe(candidate!.value)
       }

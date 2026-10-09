@@ -222,6 +222,57 @@ export function acceptCandidate(entities: Entity[], id: string): Entity[] {
   )
 }
 
+// Сущность, на которую похож кандидат, если она еще есть и того же типа.
+function relatedTarget(entities: Entity[], candidate: Entity): Entity | undefined {
+  if (!candidate.relatedTo) return undefined
+  const target = entities.find((e) => e.id === candidate.relatedTo)
+  if (!target || target.candidate || target.dismissed || target.type !== candidate.type) return undefined
+  return target
+}
+
+// Причина, по которой фрагмент попал в кандидаты. Для родственного вхождения
+// метка берется у живой исходной сущности, поэтому не устаревает после
+// перенумерации; старые документы без relatedTo показывают сохраненную строку.
+export function candidateReason(entities: Entity[], candidate: Entity): string | undefined {
+  if (candidate.relatedTo) {
+    const target = entities.find((e) => e.id === candidate.relatedTo)
+    return target && !target.candidate && !target.dismissed
+      ? `Похоже на ${target.placeholder}`
+      : 'Похоже на удаленную замену'
+  }
+  return candidate.candidateNote
+}
+
+// Принять кандидата. Родственное вхождение («Иванов П. С.» рядом с
+// [PERSON_1] «Иванов Петр Сергеевич») сливается с исходной сущностью и получает
+// ее метку: это тот же человек или компания. Если исходной сущности нет, тип
+// кандидата сменили или замена исходной выключена, кандидат принимается как
+// отдельная сущность с новой меткой: включать чужую выключенную замену молча
+// нельзя. Номера меток после слияния выравнивает compactPlaceholderNumbers.
+export function acceptRelatedCandidate(entities: Entity[], id: string): Entity[] {
+  const candidate = entities.find((e) => e.id === id)
+  if (!candidate || !candidate.candidate) return entities
+  const target = relatedTarget(entities, candidate)
+  if (!target || !target.anonymize) return acceptCandidate(entities, id)
+  const unflagged = entities.map((e) =>
+    e.id === id ? { ...e, candidate: false, candidateNote: undefined, anonymize: true } : e,
+  )
+  return mergeEntities(unflagged, id, target.id)
+}
+
+// Принять всех непроверенных кандидатов, похожих на одну сущность.
+export function acceptAllRelated(entities: Entity[], targetId: string): Entity[] {
+  const ids = entities.filter((e) => e.candidate && !e.dismissed && e.relatedTo === targetId).map((e) => e.id)
+  return ids.reduce((acc, id) => acceptRelatedCandidate(acc, id), entities)
+}
+
+// Вернуть отклоненного кандидата в список непроверенных.
+export function restoreCandidate(entities: Entity[], id: string): Entity[] {
+  const target = entities.find((e) => e.id === id)
+  if (!target || !target.dismissed) return entities
+  return entities.map((e) => (e.id === id ? { ...e, dismissed: false, candidate: true, anonymize: false } : e))
+}
+
 // Fold the source entity's occurrences into the target entity (they become one,
 // sharing the TARGET's type/value/placeholder). The source is removed. Positions
 // are merged and overlapping ranges are unioned (not dropped — dropping would
@@ -252,9 +303,13 @@ export function mergeEntities(entities: Entity[], sourceId: string, targetId: st
   }
   if (cur !== null) positions.push(cur)
 
+  // Кандидаты, похожие на исчезающую сущность, теперь похожи на ту, в которую она влилась.
   return entities
     .filter((e) => e.id !== sourceId)
-    .map((e) => (e.id === targetId ? { ...e, positions, anonymize: target.anonymize || source.anonymize } : e))
+    .map((e) => {
+      if (e.id === targetId) return { ...e, positions, anonymize: target.anonymize || source.anonymize }
+      return e.relatedTo === sourceId ? { ...e, relatedTo: targetId } : e
+    })
 }
 
 // Схлопывает дыры в нумерации плейсхолдеров, остающиеся после удаления/слияния
