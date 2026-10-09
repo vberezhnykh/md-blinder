@@ -637,20 +637,8 @@ function syntheticPdf(text: string): Buffer {
 test('a freshly uploaded PDF offers to recognize it again through OCR', async ({ page, context }) => {
   // No model or OCR data is downloaded in this test: detection falls back to rules.
   await context.route(/^https:\/\//, (route) => route.abort())
-  // pdf.js 6 relies on Map#getOrInsertComputed; older test browsers lack it.
-  await page.addInitScript(() => {
-    for (const proto of [Map.prototype, WeakMap.prototype] as Array<Map<unknown, unknown>>) {
-      if ('getOrInsertComputed' in proto) continue
-      Object.defineProperty(proto, 'getOrInsertComputed', {
-        configurable: true,
-        writable: true,
-        value(this: Map<unknown, unknown>, key: unknown, make: (key: unknown) => unknown) {
-          if (!this.has(key)) this.set(key, make(key))
-          return this.get(key)
-        },
-      })
-    }
-  })
+  // pdf.js 6 calls Map#getOrInsertComputed; the app polyfills it, so the test
+  // browser (older than that API) must open the PDF without help from the test.
   await page.goto('/')
   await page.locator('input[type=file][accept=".docx,.pdf"]').setInputFiles({
     name: 'synthetic.pdf', mimeType: 'application/pdf',
