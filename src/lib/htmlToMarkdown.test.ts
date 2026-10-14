@@ -78,32 +78,65 @@ describe('htmlToMarkdown', () => {
     expect(md).toContain('| Bob | 25 |')
   })
 
-  it('keeps colspan on a header cell when promoting <td> to <th>', () => {
-    // GFM markdown tables have no colspan syntax, so the attribute can't
-    // survive into the final markdown string — assert directly on the
-    // preprocessed HTML, where the promoted <th> should retain it.
-    const html = `
+  it('expands a header colspan into empty cells so the header matches the body width', () => {
+    const md = htmlToMarkdown(`
       <table>
-        <tr>
-          <td colspan="2"><p>Wide Header</p></td>
-        </tr>
-        <tr>
-          <td><p>A</p></td>
-          <td><p>B</p></td>
-        </tr>
+        <tr><td colspan="2"><p>Wide Header</p></td></tr>
+        <tr><td><p>A</p></td><td><p>B</p></td></tr>
       </table>
-    `
-    const preprocessed = preprocessTableHtml(html)
-
-    expect(preprocessed).toContain('colspan="2"')
-    const doc = new DOMParser().parseFromString(preprocessed, 'text/html')
-    const th = doc.querySelector('thead th')
-    expect(th?.getAttribute('colspan')).toBe('2')
-    expect(th?.textContent?.trim()).toBe('Wide Header')
-
-    // Conversion itself still succeeds (doesn't fall back to raw HTML).
-    const md = htmlToMarkdown(html)
-    expect(md).toContain('Wide Header')
+    `)
     expect(md).not.toContain('<table')
+    expect(md).toContain('| Wide Header |  |')
+    expect(md).toContain('| --- | --- |')
+    expect(md).toContain('| A | B |')
+  })
+
+  it('keeps columns aligned under a rowspan cell (mammoth output for a vertical merge)', () => {
+    const html = '<table><tr><td><p>r0c0</p></td><td colspan="2"><p>r0c1</p><p>r0c2</p></td></tr>'
+      + '<tr><td rowspan="2"><p>r1c0</p><p>r2c0</p></td><td><p>r1c1</p></td><td><p>r1c2</p></td></tr>'
+      + '<tr><td><p>r2c1</p></td><td><p>r2c2</p></td></tr></table>'
+    const lines = htmlToMarkdown(html).split('\n')
+    expect(lines).toEqual([
+      '| r0c0 | r0c1<br>r0c2 |  |',
+      '| --- | --- | --- |',
+      '| r1c0<br>r2c0 | r1c1 | r1c2 |',
+      '|  | r2c1 | r2c2 |',
+    ])
+    expect(preprocessTableHtml(html)).not.toMatch(/colspan|rowspan/)
+  })
+
+  it('fills a rowspan in the middle of a row and a block spanning rows and columns', () => {
+    const html = '<table><tr><th>A</th><th>B</th><th>C</th></tr>'
+      + '<tr><td>a1</td><td rowspan="2" colspan="2">merged</td></tr>'
+      + '<tr><td>a2</td></tr>'
+      + '<tr><td>a3</td><td>b3</td><td>c3</td></tr></table>'
+    expect(htmlToMarkdown(html).split('\n')).toEqual([
+      '| A | B | C |',
+      '| --- | --- | --- |',
+      '| a1 | merged |  |',
+      '| a2 |  |  |',
+      '| a3 | b3 | c3 |',
+    ])
+  })
+
+  it('pads short rows and clamps a rowspan that runs past the table', () => {
+    const html = '<table><tr><td>H1</td><td>H2</td><td>H3</td></tr>'
+      + '<tr><td rowspan="9">x</td><td>y</td></tr></table>'
+    expect(htmlToMarkdown(html).split('\n')).toEqual([
+      '| H1 | H2 | H3 |',
+      '| --- | --- | --- |',
+      '| x | y |  |',
+    ])
+  })
+
+  it('expands spans of a nested table separately from the outer table', () => {
+    const html = '<table><tr><td>Outer</td><td>Second</td></tr>'
+      + '<tr><td><table><tr><td colspan="2">inner</td></tr><tr><td>i1</td><td>i2</td></tr></table></td><td>o2</td></tr></table>'
+    const doc = new DOMParser().parseFromString(preprocessTableHtml(html), 'text/html')
+    const outer = doc.querySelector('table')!
+    const inner = outer.querySelector('table')!
+    expect(inner.querySelectorAll('tr')[0].children).toHaveLength(2)
+    expect(Array.from(outer.querySelectorAll('tr')).filter((tr) => tr.closest('table') === outer)
+      .map((tr) => tr.children.length)).toEqual([2, 2])
   })
 })
