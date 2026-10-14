@@ -1,0 +1,72 @@
+name: Desktop release
+
+# Тег desktop-vX.Y.Z выпускает сборку под Windows как релиз GitHub.
+# Настольная программа находит его через API релизов и предлагает обновиться.
+on:
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Version matches tag
+        shell: pwsh
+        run: |
+          $version = python -c "import md_blinder; print(md_blinder.__version__)"
+          $tag = "${{ github.ref_name }}".Substring("desktop-v".Length)
+          if ($version -ne $tag) { Write-Error "Версия в коде $version не совпадает с тегом $tag"; exit 1 }
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Build
+        run: pyinstaller --noconfirm --clean md_blinder.spec
+
+      - name: Self-check of the built app
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\MD Blinder\MD Blinder.exe" -ArgumentList "--self-check" -Wait -PassThru
+          Get-Content "$env:LOCALAPPDATA\md-blinder\self-check.txt"
+          if ($p.ExitCode -ne 0) { exit 1 }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\MD Blinder\*" -DestinationPath "md-blinder-windows.zip"
+          $hash = (Get-FileHash "md-blinder-windows.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "md-blinder-windows.zip.sha256" -Value "$hash  md-blinder-windows.zip" -NoNewline -Encoding ascii
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}".Substring("desktop-v".Length)
+          $notes = "Настольная версия MD Blinder $version для Windows. Обновление ставится из программы; первая установка — распаковать архив в свою папку и запустить MD Blinder.exe."
+          gh release create "${{ github.ref_name }}" md-blinder-windows.zip md-blinder-windows.zip.sha256 `
+            --repo "${{ github.repository }}" --title "MD Blinder Desktop $version" --notes "$notes" --generate-notes
