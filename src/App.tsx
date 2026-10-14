@@ -587,7 +587,7 @@ function App() {
           historyDocs={visibleHistory}
           currentDocId={currentDocId}
           onOpenDoc={(doc) => { void handleOpenDoc(doc) }}
-          onShowAllDocs={() => { void flush().then(() => setHasResult(false)).catch(() => {}) }}
+          onGoHome={() => { void flush().then(() => setHasResult(false)).catch(() => {}) }}
           onExportHistory={() => { void handleExportHistory() }}
           onImportHistory={(file) => { void handleImportHistory(file) }}
         />

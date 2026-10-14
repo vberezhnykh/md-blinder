@@ -400,6 +400,11 @@ test('the top bar opens documents from the history menu and picks a new file', a
   const chooser = page.waitForEvent('filechooser')
   await page.getByRole('button', { name: 'Новый файл', exact: true }).click()
   await chooser
+
+  await page.getByRole('button', { name: 'На главную', exact: true }).click()
+  await expect(page.locator('.topbar')).toHaveCount(0)
+  await expect(page.locator('.dropzone')).toBeVisible()
+  await expect(page.locator('.history-panel')).toContainText('Synthetic B.docx')
 })
 
 test('the status strip follows the review and the export menu holds the replacement table', async ({ page }) => {

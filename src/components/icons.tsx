@@ -28,6 +28,10 @@ export const UploadIcon = ({ size }: IconProps) => (
   <Icon size={size}><path d="M12 15V3" /><path d="m7 8 5-5 5 5" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></Icon>
 )
 
+export const HomeIcon = ({ size }: IconProps) => (
+  <Icon size={size}><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9" /><path d="M10 21v-6h4v6" /></Icon>
+)
+
 export const ClockIcon = ({ size }: IconProps) => (
   <Icon size={size}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>
 )

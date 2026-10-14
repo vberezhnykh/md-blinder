@@ -294,6 +294,7 @@
   font-size: 13px;
 }
 .history-error { color: var(--danger); font-size: 13px; margin: 8px 0 0; }
+.topbar-home,
 .topbar-upload {
   display: inline-flex;
   align-items: center;

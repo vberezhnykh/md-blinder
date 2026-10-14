@@ -2,7 +2,7 @@ import { useRef, type DragEvent } from 'react'
 import type { HistoryDocMeta } from '../lib/history'
 import { plural } from '../lib/plural'
 import Menu from './Menu'
-import { AlertIcon, BlinderMark, CheckIcon, ClockIcon, UploadIcon } from './icons'
+import { AlertIcon, BlinderMark, CheckIcon, ClockIcon, HomeIcon, UploadIcon } from './icons'
 
 // Сколько последних документов показывать в меню «История». Полный список с
 // удалением остается на стартовом экране.
@@ -20,7 +20,7 @@ interface TopBarProps {
   historyDocs: HistoryDocMeta[]
   currentDocId: string | null
   onOpenDoc: (doc: HistoryDocMeta) => void
-  onShowAllDocs: () => void
+  onGoHome: () => void
   onExportHistory: () => void
   onImportHistory: (file: File) => void
 }
@@ -38,7 +38,7 @@ function SaveStatus({ state }: { state: TopBarProps['saveState'] }) {
 function TopBar({
   fileName, saveState, isLoading, isDragging, onDragOver, onDragLeave, onDrop,
   onPickFile,
-  historyDocs, currentDocId, onOpenDoc, onShowAllDocs, onExportHistory, onImportHistory,
+  historyDocs, currentDocId, onOpenDoc, onGoHome, onExportHistory, onImportHistory,
 }: TopBarProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const recent = historyDocs.slice(0, RECENT_DOCS)
@@ -68,6 +68,14 @@ function TopBar({
         <SaveStatus state={saveState} />
       </div>
       <div className="topbar-actions">
+        <button
+          type="button"
+          className="topbar-home"
+          title="Стартовый экран со всеми документами"
+          onClick={onGoHome}
+        >
+          <HomeIcon />На главную
+        </button>
         <button
           type="button"
           className="topbar-upload"
@@ -103,7 +111,7 @@ function TopBar({
                 История хранится в этом браузере вместе с исходным текстом, без шифрования.
               </p>
               <div className="menu-row">
-                <button type="button" className="menu-small" onClick={() => { close(); onShowAllDocs() }}>Все документы</button>
+                <button type="button" className="menu-small" onClick={() => { close(); onGoHome() }}>Все документы</button>
                 <button type="button" className="menu-small" disabled={historyDocs.length === 0} onClick={() => { close(); onExportHistory() }}>Экспорт</button>
                 <button type="button" className="menu-small" onClick={() => { close(); importInputRef.current?.click() }}>Импорт</button>
               </div>
