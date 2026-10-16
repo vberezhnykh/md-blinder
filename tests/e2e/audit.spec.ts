@@ -653,3 +653,62 @@ test('a freshly uploaded PDF offers to recognize it again through OCR', async ({
   await expect(page.locator('.status-block, .status.error')).toBeVisible()
   await expect(page.locator('.ocr-retry')).toHaveCount(0)
 })
+
+test('several files uploaded together share placeholders across the package', async ({ page }) => {
+  // Without the NER model only rule-based data is found, which is enough here.
+  await page.context().route(/^https:\/\//, (route) => route.abort())
+  await page.goto('/')
+  await page.locator('input[type=file][accept=".docx,.pdf"]').setInputFiles([
+    { name: 'first.pdf', mimeType: 'application/pdf', buffer: syntheticPdf('Write to alice@example.test or bob@example.test') },
+    { name: 'second.pdf', mimeType: 'application/pdf', buffer: syntheticPdf('Copy bob@example.test and carol@example.test') },
+  ])
+  await expect(page.locator('.topbar-filename')).toHaveText('first.pdf', { timeout: 30_000 })
+  await expect(page.locator('.toast')).toContainText('В пакете 2 документа')
+  await showResult(page)
+  await expect(page.locator('.anonymized-preview')).toContainText('Write to [EMAIL_1] or [EMAIL_2]')
+
+  const packageButton = page.getByRole('button', { name: 'Пакет · 2', exact: true })
+  await packageButton.click()
+  await page.locator('.menu-panel').getByRole('button', { name: /second\.pdf/ }).click()
+  await expect(page.locator('.topbar-filename')).toHaveText('second.pdf')
+  await showResult(page)
+  await expect(page.locator('.anonymized-preview')).toContainText('Copy [EMAIL_2] and [EMAIL_3]')
+
+  await packageButton.click()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: /^Экспортировать пакет одним \.md/ }).click()
+  const text = await downloadedText(await download)
+  expect(text).toContain('# Документ 1\n\nWrite to [EMAIL_1] or [EMAIL_2]')
+  expect(text).toContain('# Документ 2\n\nCopy [EMAIL_2] and [EMAIL_3]')
+  expect(text).not.toContain('example.test')
+  expect(text).not.toContain('.pdf')
+})
+
+test('a package realigns placeholders on open and keeps them aligned while editing', async ({ page }) => {
+  const first = 'Party Alex signs. Alex pays.'
+  const second = 'Partner Alex and Sam'
+  const sam = (text: string): Entity => {
+    const start = text.indexOf('Sam')
+    return { id: 'person-sam', type: 'PERSON', value: 'Sam', placeholder: '[PERSON_2]', positions: [{ start, end: start + 3 }], anonymize: true, manual: false }
+  }
+  const alexFirst = { ...person(first), positions: [{ start: 6, end: 10 }, { start: 18, end: 22 }] }
+  // The second document was labelled on its own: Alex got [PERSON_2] there.
+  const alexSecond: Entity = { ...person(second), id: 'person-alex-2', placeholder: '[PERSON_2]' }
+  const samSecond: Entity = { ...sam(second), placeholder: '[PERSON_1]' }
+  await seed(page, [
+    { ...document('A', first, [alexFirst]), batchId: 'deal' },
+    { ...document('B', second, [alexSecond, samSecond]), batchId: 'deal', createdAt: 1_700_000_000_001 },
+  ])
+  await expect(page.locator('.history-row').first()).toContainText('пакет из 2 документов')
+  await open(page, 'B')
+  await showResult(page)
+  await expect(page.locator('.anonymized-preview')).toHaveText('Partner [PERSON_1] and [PERSON_2]')
+  await expect.poll(async () => (await readSaved(page, 'B'))?.entities.map((e) => e.placeholder)).toEqual(['[PERSON_1]', '[PERSON_2]'])
+
+  // Deleting Alex here would renumber Sam to [PERSON_1] in a lone document, but
+  // in the package that label belongs to Alex, so Sam keeps a label of its own.
+  const alexRow = page.locator('.entity-row').filter({ hasText: 'Alex' })
+  await alexRow.locator('.entity-value-button').click()
+  await alexRow.getByRole('button', { name: /^Удалить/ }).click()
+  await expect(page.locator('.anonymized-preview')).toHaveText('Partner Alex and [PERSON_2]')
+})

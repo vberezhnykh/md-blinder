@@ -8,6 +8,8 @@ export interface HistoryDoc {
   updatedAt: number
   sourceText: string
   entities: Entity[]
+  // Пакет: документы с одним batchId получают согласованные метки замены.
+  batchId?: string
 }
 
 const DB_NAME = 'md-blinder'
@@ -100,6 +102,13 @@ export async function loadHistoryMetadata(): Promise<HistoryDocMeta[]> {
     transactionDone(tx),
   ])
   return docs.sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+// Документы пакета в порядке загрузки.
+export async function loadBatchDocs(batchId: string): Promise<HistoryDoc[]> {
+  const metadata = await loadHistoryMetadata()
+  const docs = await Promise.all(metadata.filter((meta) => meta.batchId === batchId).map((meta) => loadDoc(meta.id)))
+  return docs.filter((doc): doc is HistoryDoc => doc !== undefined).sort((a, b) => a.createdAt - b.createdAt)
 }
 
 export async function loadAllDocs(): Promise<HistoryDoc[]> {
@@ -226,6 +235,7 @@ export function parseHistory(json: string): HistoryDoc[] {
       updatedAt: typeof d.updatedAt === 'number' ? d.updatedAt : now,
       sourceText: d.sourceText,
       entities: sanitizeEntities(d.entities, d.sourceText.length),
+      ...(typeof d.batchId === 'string' ? { batchId: d.batchId } : {}),
     }
   })
 }

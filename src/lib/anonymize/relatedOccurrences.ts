@@ -100,9 +100,13 @@ function personForms(value: string): Form[] {
   return forms
 }
 
+// Слова названия компании без ОПФ и кавычек: «ООО «Гамма Плюс»» → ['Гамма', 'Плюс'].
+export function companyCoreWords(value: string): string[] {
+  return splitWords(value).filter((w) => !LEGAL_FORMS.has(w.toLowerCase().replace(/\.$/, '')))
+}
+
 function companyForms(value: string): Form[] {
-  const words = splitWords(value)
-  const core = words.filter((w) => !LEGAL_FORMS.has(w.toLowerCase().replace(/\.$/, '')))
+  const core = companyCoreWords(value)
   const forms: Form[] = []
   // Полная «ядровая» фраза (без ОПФ/кавычек) — первой, чтобы застолбить спан.
   if (core.length >= 2) {

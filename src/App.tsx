@@ -3,6 +3,8 @@ import { detectFileKind } from './lib/fileType'
 import { anonymizeMarkdown, type AnonymizeProgress } from './lib/anonymize'
 import { findRelatedOccurrences } from './lib/anonymize/relatedOccurrences'
 import { entitiesToCsv } from './lib/anonymize/csv'
+import { alignBatch, reconcileBatchPlaceholders, seedFromBatch } from './lib/anonymize/batch'
+import { batchEntitiesToCsv, batchToMarkdown } from './lib/anonymize/batchExport'
 import { addEntityFromSelection, addOccurrenceToEntity, buildAnonymizedTextWithMap, changeEntityType, compactPlaceholderNumbers, dedupeEntityIds, acceptRelatedCandidate, acceptAllRelated, restoreCandidate, pendingCandidates, mergeEntities } from './lib/anonymize/apply'
 import { hasPlaceholderCollision } from './lib/anonymize/placeholderGuard'
 import { findImageRanges } from './lib/anonymize/imageSafety'
@@ -10,7 +12,7 @@ import { statusLabel, statusHint, type UiProgress } from './lib/progressLabel'
 import { copyText } from './lib/clipboard'
 import { plural } from './lib/plural'
 import type { Entity, EntityType } from './lib/anonymize/types'
-import { loadAllDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDocMeta } from './lib/history'
+import { loadAllDocs, loadBatchDocs, loadDoc, putDoc, deleteDoc, serializeHistory, parseHistory, mergeDocs, type HistoryDoc, type HistoryDocMeta } from './lib/history'
 import { useDocumentSession } from './hooks/useDocumentSession'
 import { useAnalysisJob } from './hooks/useAnalysisJob'
 import { useHistoryStore } from './hooks/useHistoryStore'
@@ -50,6 +52,64 @@ function downloadBlob(blob: Blob, name: string) {
 
 type Progress = UiProgress
 
+// Файл, который нельзя обработать: сообщение показывается пользователю как есть.
+class FileRejected extends Error {}
+
+// Конвертирует файл и размечает найденные данные. Для документа пакета
+// дополнительно размечает значения, подтвержденные в других документах пакета,
+// и согласует с ними метки.
+async function analyzeFile(file: File, options: {
+  signal: AbortSignal
+  forceOcr: boolean
+  batchId?: string
+  members: HistoryDoc[]
+  onProgress: (p: Progress) => void
+}): Promise<{ doc: HistoryDoc; nerFailed: boolean }> {
+  const { signal, forceOcr, batchId, members, onProgress } = options
+  const kind = await detectFileKind(file)
+  signal.throwIfAborted()
+  if (kind === 'legacy-doc') {
+    throw new FileRejected(
+      `Формат .doc не поддерживается. Откройте файл "${file.name}" в Word и сохраните как .docx, затем загрузите заново.`,
+    )
+  }
+  if (kind === 'unknown') {
+    throw new FileRejected(`Файл "${file.name}" не поддерживается. Поддерживаются .docx и .pdf (включая сканы).`)
+  }
+
+  const buffer = await file.arrayBuffer()
+  signal.throwIfAborted()
+  let md: string
+  if (kind === 'docx') {
+    const { docxToMarkdown } = await import('./lib/docxToMarkdown')
+    md = await docxToMarkdown(buffer, { signal })
+  } else {
+    const { pdfToMarkdown } = await import('./lib/pdfToMarkdown')
+    const result = await pdfToMarkdown(buffer,
+      (page, total) => onProgress({ phase: 'pdf', page, total }),
+      (p) => onProgress({ phase: 'ocr', page: p.page, total: p.total, pct: p.pct }),
+      { signal, forceOcr },
+    )
+    md = result.markdown
+  }
+  signal.throwIfAborted()
+  const { result, nerFailed } = await anonymizeMarkdown(md, (p) => onProgress(toProgress(p)), signal)
+  signal.throwIfAborted()
+  const seeded = seedFromBatch(md, result.entities, members)
+  // Родственные формы найденных сущностей (падежи фамилий, инициалы, название
+  // без ОПФ) ищутся правилами без NER, поэтому их можно предложить сразу.
+  const related = findRelatedOccurrences(md, seeded)
+  const entities = reconcileBatchPlaceholders([...seeded, ...related], md, members)
+  const now = Date.now()
+  return {
+    doc: {
+      id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now, updatedAt: now,
+      sourceText: md, entities, ...(batchId ? { batchId } : {}),
+    },
+    nerFailed,
+  }
+}
+
 // Стейджи конвейера анонимизации 1:1 ложатся на фазы индикатора — маппинг
 // оставлен явным, чтобы новый стейдж нельзя было забыть показать.
 function toProgress(p: AnonymizeProgress): Progress {
@@ -70,7 +130,15 @@ function toProgress(p: AnonymizeProgress): Progress {
 function App() {
   const historyStore = useHistoryStore()
   const { history, error: historyError, setError: setHistoryError, saving, queueSave, flush, refresh: refreshHistory } = historyStore
-  const { snapshot, snapshotRef, replace, edit, setEntities } = useDocumentSession(queueSave)
+  // Остальные документы пакета открытого документа. Каждая правка согласует
+  // метки с ними: одинаковые значения получают одинаковые метки во всем пакете.
+  const batchOthersRef = useRef<HistoryDoc[]>([])
+  const prepareDoc = useCallback((doc: HistoryDoc): HistoryDoc => {
+    if (!doc.batchId) return doc
+    const reconciled = reconcileBatchPlaceholders(doc.entities, doc.sourceText, batchOthersRef.current)
+    return reconciled === doc.entities ? doc : { ...doc, entities: reconciled }
+  }, [])
+  const { snapshot, snapshotRef, replace, edit, setEntities } = useDocumentSession(queueSave, prepareDoc)
   const { start: startJob, cancel: cancelJob } = useAnalysisJob()
   const sourceText = snapshot.doc?.sourceText ?? ''
   const entities = snapshot.doc?.entities ?? EMPTY_ENTITIES
@@ -91,6 +159,8 @@ function App() {
   const [error, setError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
+  // Номер обрабатываемого файла, когда загружено несколько.
+  const [batchStep, setBatchStep] = useState<{ index: number; total: number } | null>(null)
   // Секунды с начала обработки. Фазы NER на CPU идут по 10–40 секунд без
   // процентов — тикающий таймер единственный признак, что ничего не зависло.
   const [elapsedSec, setElapsedSec] = useState(0)
@@ -112,6 +182,7 @@ function App() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const pendingDeleteRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const batchInputRef = useRef<HTMLInputElement>(null)
 
   const showToast = useCallback((next: Omit<ToastState, 'key'>) => {
     toastKey.current += 1
@@ -139,6 +210,20 @@ function App() {
   const anonymizedText = anonymized.text
   const unreviewedCount = useMemo(() => entities.filter((e) => e.candidate && !e.dismissed).length, [entities])
 
+  // Загружает пакет документа и согласует метки во всех его документах по
+  // порядку загрузки. Измененные остальные документы сохраняются сразу;
+  // сам документ возвращается вызывающему, чтобы тот открыл или сохранил его.
+  const loadBatchFor = useCallback(async (doc: HistoryDoc): Promise<{ doc: HistoryDoc; members: HistoryDoc[] }> => {
+    if (!doc.batchId) return { doc, members: [doc] }
+    const stored = await loadBatchDocs(doc.batchId)
+    const members = stored.some((d) => d.id === doc.id)
+      ? stored.map((d) => (d.id === doc.id ? doc : d))
+      : [...stored, doc]
+    const aligned = alignBatch(members)
+    await Promise.all(aligned.filter((d, i) => d !== members[i] && d.id !== doc.id).map((d) => putDoc(d)))
+    return { doc: aligned.find((d) => d.id === doc.id)!, members: aligned }
+  }, [])
+
   const handleOpenDoc = useCallback(async (meta: HistoryDocMeta) => {
     cancelAnalysis()
     const job = startJob()
@@ -149,7 +234,11 @@ function App() {
         const doc = await loadDoc(meta.id)
         if (!job.isCurrent()) return
         if (!doc) throw new Error('Документ не найден в истории')
-        replace({ ...doc, entities: dedupeEntityIds(doc.entities) })
+        const loaded = { ...doc, entities: dedupeEntityIds(doc.entities) }
+        const { doc: aligned, members } = await loadBatchFor(loaded)
+        if (!job.isCurrent()) return
+        batchOthersRef.current = members.filter((d) => d.id !== aligned.id)
+        replace(aligned, aligned !== loaded)
       }
       setFileName(meta.name)
       setNerNotice(false)
@@ -163,7 +252,7 @@ function App() {
     } finally {
       job.finish()
     }
-  }, [cancelAnalysis, startJob, flush, snapshotRef, replace, setHistoryError])
+  }, [cancelAnalysis, startJob, flush, snapshotRef, replace, setHistoryError, loadBatchFor])
 
   const handleDeleteDoc = useCallback(async (id: string) => {
     try {
@@ -172,6 +261,7 @@ function App() {
       if (snapshotRef.current.doc?.id === id) cancelAnalysis()
       await flush()
       await deleteDoc(id)
+      batchOthersRef.current = batchOthersRef.current.filter((d) => d.id !== id)
       if (snapshotRef.current.doc?.id === id) {
         cancelAnalysis()
         replace(null)
@@ -248,98 +338,131 @@ function App() {
     }
   }, [flush, refreshHistory, setHistoryError, snapshotRef, cancelAnalysis, replace])
 
-  const processFile = useCallback(async (file: File, forceOcr = false) => {
+  // Один файл открывается как отдельный документ. Несколько файлов, а также
+  // файлы, добавленные к открытому документу, образуют пакет: одинаковые
+  // значения получают одинаковые метки во всех его документах. Файл, который
+  // не удалось обработать, пропускается, остальные обрабатываются.
+  const processFiles = useCallback(async (
+    files: File[],
+    options: { forceOcr?: boolean; batch?: { id: string; members: HistoryDoc[] } } = {},
+  ) => {
+    if (files.length === 0) return
+    const forceOcr = options.forceOcr ?? false
     cancelAnalysis()
     const job = startJob()
     setError('')
     setProgress(null)
     setStatus('loading')
     setElapsedSec(0)
-    setFileName(file.name)
+    setFileName(files.length === 1 ? files[0].name : plural(files.length, ['файл', 'файла', 'файлов']))
     setNerNotice(false)
     setView('source')
     setHasResult(false)
 
+    const batchId = options.batch?.id ?? (files.length > 1 ? crypto.randomUUID() : undefined)
+    const members = [...(options.batch?.members ?? [])]
+    const created: HistoryDoc[] = []
+    const failures: string[] = []
+    let nerFailed = false
     try {
       await flush()
       if (!job.isCurrent()) return
       replace(null)
-      const kind = await detectFileKind(file)
-      job.signal.throwIfAborted()
-
-      if (kind === 'legacy-doc') {
+      for (const [index, file] of files.entries()) {
+        setBatchStep(files.length > 1 ? { index: index + 1, total: files.length } : null)
+        setProgress(null)
+        try {
+          const analyzed = await analyzeFile(file, {
+            signal: job.signal, forceOcr, batchId, members,
+            onProgress: (p) => { if (job.isCurrent()) setProgress(p) },
+          })
+          if (!job.isCurrent()) return
+          created.push(analyzed.doc)
+          members.push(analyzed.doc)
+          queueSave(analyzed.doc)
+          nerFailed ||= analyzed.nerFailed
+        } catch (e) {
+          if (!job.isCurrent() || job.signal.aborted) return
+          const name = files.length > 1 ? ` «${file.name}»` : ''
+          failures.push(e instanceof FileRejected ? e.message
+            : `Не удалось сконвертировать файл${name}: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+      if (created.length === 0) {
         setStatus('error')
-        setError(
-          `Формат .doc не поддерживается. Откройте файл "${file.name}" в Word и сохраните как .docx, затем загрузите заново.`,
-        )
+        setError(failures.join(' '))
         return
       }
-
-      if (kind === 'unknown') {
-        setStatus('error')
-        setError(
-          `Файл "${file.name}" не поддерживается. Поддерживаются .docx и .pdf (включая сканы).`,
-        )
-        return
-      }
-
-      const buffer = await file.arrayBuffer()
-      job.signal.throwIfAborted()
-      let md: string
-      if (kind === 'docx') {
-        const { docxToMarkdown } = await import('./lib/docxToMarkdown')
-        md = await docxToMarkdown(buffer, { signal: job.signal })
-      } else {
-        const { pdfToMarkdown } = await import('./lib/pdfToMarkdown')
-        const result = await pdfToMarkdown(buffer,
-          (page, total) => { if (job.isCurrent()) setProgress({ phase: 'pdf', page, total }) },
-          (p) => { if (job.isCurrent()) setProgress({ phase: 'ocr', page: p.page, total: p.total, pct: p.pct }) },
-          { signal: job.signal, forceOcr },
-        )
-        md = result.markdown
-      }
-      job.signal.throwIfAborted()
-      const { result, nerFailed } = await anonymizeMarkdown(md,
-        (p) => { if (job.isCurrent()) setProgress(toProgress(p)) }, job.signal)
-      if (!job.isCurrent()) return
-      // Родственные формы найденных сущностей (падежи фамилий, инициалы, название
-      // без ОПФ) ищутся правилами без NER, поэтому их можно предложить сразу.
-      const related = findRelatedOccurrences(md, result.entities)
-      const now = Date.now()
-      const docId = crypto.randomUUID()
-      replace({ id: docId, name: file.name, format: kind, createdAt: now,
-        updatedAt: now, sourceText: md, entities: [...result.entities, ...related] }, true)
-      setLastPdf(kind === 'pdf' ? { file, docId, ocrForced: forceOcr } : null)
+      const opened = created[0]
+      batchOthersRef.current = members.filter((d) => d.id !== opened.id)
+      replace(opened, true)
+      setFileName(opened.name)
+      setLastPdf(files.length === 1 && opened.format === 'pdf' ? { file: files[0], docId: opened.id, ocrForced: forceOcr } : null)
       setNerNotice(nerFailed)
       setView('source')
       setSideTab(null)
       setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
       setStatus('idle')
       setHasResult(true)
+      if (failures.length > 0) {
+        showToast({ text: `Обработаны не все файлы. ${failures.join(' ')}`, tone: 'warn', durationMs: 12000 })
+      } else if (batchId && members.length > 1) {
+        showToast({
+          text: `В пакете ${plural(members.length, ['документ', 'документа', 'документов'])}: одинаковые значения заменены одинаковыми метками во всех. Остальные документы пакета открываются из меню «Пакет».`,
+          durationMs: 8000,
+        })
+      }
     } catch (e) {
       if (!job.isCurrent() || job.signal.aborted) return
       setStatus('error')
-      setError(
-        `Не удалось сконвертировать файл: ${e instanceof Error ? e.message : String(e)}`,
-      )
+      setError(`Не удалось сконвертировать файл: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
+      setBatchStep(null)
       job.finish()
     }
-  }, [cancelAnalysis, startJob, flush, replace])
+  }, [cancelAnalysis, startJob, flush, replace, queueSave, showToast])
 
   // Текстовый слой PDF может быть испорчен (сломанная кодировка шрифтов, ошибки
   // старого OCR). Автоматика ему доверяет, а битый текст виден только в
   // результате, поэтому повторное распознавание предлагается после загрузки.
   // Новый документ сохраняется отдельно: правки разметки в прежнем не теряются.
+  // Если документ был в пакете, его место в пакете занимает новая версия.
   const retryWithOcr = useCallback(() => {
-    if (lastPdf) void processFile(lastPdf.file, true)
-  }, [lastPdf, processFile])
+    if (!lastPdf) return
+    const current = snapshotRef.current.doc
+    if (current?.id === lastPdf.docId && current.batchId) {
+      const { batchId, ...detached } = current
+      const members = batchOthersRef.current
+      replace(detached, true)
+      void processFiles([lastPdf.file], { forceOcr: true, batch: { id: batchId, members } })
+      return
+    }
+    void processFiles([lastPdf.file], { forceOcr: true })
+  }, [lastPdf, processFiles, snapshotRef, replace])
+
+  // Добавляет файлы в пакет открытого документа; одиночный документ при этом
+  // становится первым документом нового пакета.
+  const addToBatch = useCallback((files: File[]) => {
+    const current = snapshotRef.current.doc
+    if (!current || files.length === 0) return
+    const batchId = current.batchId ?? crypto.randomUUID()
+    const joined = current.batchId ? current : { ...current, batchId }
+    if (joined !== current) replace(joined, true)
+    const members = [...batchOthersRef.current, joined].sort((a, b) => a.createdAt - b.createdAt)
+    void processFiles(files, { batch: { id: batchId, members } })
+  }, [snapshotRef, replace, processFiles])
 
   const isLoading = status === 'loading'
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file && !isLoading) void processFile(file)
+    const files = Array.from(e.target.files ?? [])
+    if (!isLoading) void processFiles(files)
+    e.target.value = ''
+  }
+
+  const handleBatchInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (!isLoading) addToBatch(files)
     e.target.value = ''
   }
 
@@ -352,8 +475,7 @@ function App() {
     e.preventDefault()
     setIsDragging(false)
     if (isLoading) return
-    const file = e.dataTransfer.files?.[0]
-    if (file) void processFile(file)
+    void processFiles(Array.from(e.dataTransfer.files ?? []))
   }
 
   const showCandidates = useCallback(() => {
@@ -402,6 +524,43 @@ function App() {
     const csv = entitiesToCsv(entities, sourceText)
     downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }), `${baseName(fileName)}-replacements.csv`)
   }
+
+  // Документы пакета с согласованными метками, в порядке загрузки. Если
+  // согласование изменило открытый документ, он обновляется на экране.
+  const collectBatch = useCallback(async (): Promise<HistoryDoc[] | null> => {
+    await flush()
+    const current = snapshotRef.current.doc
+    if (!current?.batchId) return null
+    const { doc, members } = await loadBatchFor(current)
+    batchOthersRef.current = members.filter((d) => d.id !== doc.id)
+    if (doc !== current && snapshotRef.current.doc === current) replace(doc, true)
+    return members
+  }, [flush, snapshotRef, loadBatchFor, replace])
+
+  const handleExportBatch = useCallback(async () => {
+    try {
+      const members = await collectBatch()
+      if (!members) return
+      downloadBlob(new Blob([batchToMarkdown(members)], { type: 'text/markdown;charset=utf-8' }), 'md-blinder-package.md')
+      const pending = members.reduce((sum, d) => sum + d.entities.filter((e) => e.candidate && !e.dismissed).length, 0)
+      const done = `Пакет из ${plural(members.length, ['документа', 'документов', 'документов'])} сохранен одним файлом.`
+      showToast(pending === 0
+        ? { text: done, durationMs: 4000 }
+        : { text: `${done} Не проверено: ${plural(pending, ['кандидат', 'кандидата', 'кандидатов'])} — в тексте они остались без замены.`, tone: 'warn', durationMs: 8000 })
+    } catch (err) {
+      showToast({ text: `Не удалось собрать пакет: ${err instanceof Error ? err.message : String(err)}`, tone: 'error', durationMs: 6000 })
+    }
+  }, [collectBatch, showToast])
+
+  const handleExportBatchCsv = useCallback(async () => {
+    try {
+      const members = await collectBatch()
+      if (!members) return
+      downloadBlob(new Blob(['\uFEFF' + batchEntitiesToCsv(members)], { type: 'text/csv;charset=utf-8' }), 'md-blinder-package-replacements.csv')
+    } catch (err) {
+      showToast({ text: `Не удалось собрать пакет: ${err instanceof Error ? err.message : String(err)}`, tone: 'error', durationMs: 6000 })
+    }
+  }, [collectBatch, showToast])
 
   const handleToggle = useCallback((id: string) => {
     setEntities((prev) => prev.map((e) => (e.id === id ? { ...e, anonymize: !e.anonymize } : e)))
@@ -483,7 +642,15 @@ function App() {
     () => (pendingDeleteId ? history.filter((d) => d.id !== pendingDeleteId) : history),
     [history, pendingDeleteId],
   )
+  const currentBatchId = snapshot.doc?.batchId
+  const batchDocs = useMemo(
+    () => (currentBatchId
+      ? visibleHistory.filter((d) => d.batchId === currentBatchId).sort((a, b) => a.createdAt - b.createdAt)
+      : []),
+    [visibleHistory, currentBatchId],
+  )
   const openFilePicker = () => { if (!isLoading) fileInputRef.current?.click() }
+  const openBatchPicker = () => { if (!isLoading) batchInputRef.current?.click() }
   const placeholderCollision = useMemo(() => hasPlaceholderCollision(sourceText), [sourceText])
   const imageCount = useMemo(() => findImageRanges(sourceText).length, [sourceText])
 
@@ -493,9 +660,21 @@ function App() {
         ref={fileInputRef}
         type="file"
         accept=".docx,.pdf"
+        multiple
         hidden
         onChange={handleFileInput}
       />
+      {hasResult && (
+        <input
+          ref={batchInputRef}
+          type="file"
+          accept=".docx,.pdf"
+          multiple
+          hidden
+          aria-label="Добавить документы в пакет"
+          onChange={handleBatchInput}
+        />
+      )}
 
       {!hasResult && (
         <>
@@ -545,6 +724,9 @@ function App() {
             <p className="dropzone-hint">
               Поддерживаются текстовые и сканированные PDF (распознавание через OCR)
             </p>
+            <p className="dropzone-hint">
+              Несколько файлов сразу обрабатываются пакетом: одна и та же сторона получает одинаковую метку во всех документах
+            </p>
             {fileName && <p className="filename">Файл: {fileName}</p>}
           </div>
         </div>
@@ -554,6 +736,7 @@ function App() {
         <div className="status-block">
           <p className="status status-loading" aria-live="polite">
             <span className="spinner" aria-hidden="true" />
+            {batchStep && `Документ ${batchStep.index} из ${batchStep.total}. `}
             {statusLabel(progress, elapsedSec)}
           </p>
           {statusHint(progress) && <p className="status-hint">{statusHint(progress)}</p>}
@@ -588,6 +771,11 @@ function App() {
           currentDocId={currentDocId}
           onOpenDoc={(doc) => { void handleOpenDoc(doc) }}
           onShowAllDocs={() => { void flush().then(() => setHasResult(false)).catch(() => {}) }}
+          inBatch={Boolean(currentBatchId)}
+          batchDocs={batchDocs}
+          onAddToBatch={openBatchPicker}
+          onExportBatch={() => { void handleExportBatch() }}
+          onExportBatchCsv={() => { void handleExportBatchCsv() }}
           onExportHistory={() => { void handleExportHistory() }}
           onImportHistory={(file) => { void handleImportHistory(file) }}
         />
@@ -615,7 +803,10 @@ function App() {
               <button type="button" className="link-button" onClick={retryWithOcr}>
                 Распознать заново через OCR
               </button>
-              <span className="ocr-retry-hint"> Все страницы PDF будут распознаны как изображения. Прежняя версия останется в истории.</span>
+              <span className="ocr-retry-hint">
+                {' '}Все страницы PDF будут распознаны как изображения. Прежняя версия останется в истории
+                {currentBatchId ? ', а в пакете ее заменит новая.' : '.'}
+              </span>
             </p>
           )}
           {nerNotice && (
