@@ -218,6 +218,14 @@
 .menu-panel-start { left: 0; }
 .menu-panel-wide { width: 340px; }
 
+/* На узком экране кнопки верхней панели переносятся, и панель меню, прижатая
+   к кнопке, уходит за край окна. Здесь она занимает ширину верхней панели. */
+@media (max-width: 600px) {
+  .topbar { position: relative; }
+  .topbar .menu { position: static; }
+  .topbar .menu-panel { left: 8px; right: 8px; width: auto; max-width: none; }
+}
+
 .menu-item {
   display: flex;
   flex-direction: column;

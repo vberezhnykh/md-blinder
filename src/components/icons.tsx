@@ -28,6 +28,14 @@ export const UploadIcon = ({ size }: IconProps) => (
   <Icon size={size}><path d="M12 15V3" /><path d="m7 8 5-5 5 5" /><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" /></Icon>
 )
 
+export const LayersIcon = ({ size }: IconProps) => (
+  <Icon size={size}><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /></Icon>
+)
+
+export const PlusIcon = ({ size }: IconProps) => (
+  <Icon size={size}><path d="M12 5v14" /><path d="M5 12h14" /></Icon>
+)
+
 export const ClockIcon = ({ size }: IconProps) => (
   <Icon size={size}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Icon>
 )

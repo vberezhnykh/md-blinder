@@ -43,6 +43,12 @@ describe('serializeHistory / parseHistory round-trip', () => {
     expect(d1.format).toBe('docx')
     expect(d2.format).toBe('pdf')
   })
+
+  it('сохраняет пакет документа и не придумывает его для одиночных', () => {
+    const [batched, single] = parseHistory(serializeHistory([makeDoc({ batchId: 'b1' }), makeDoc({ id: 'doc-2' })]))
+    expect(batched.batchId).toBe('b1')
+    expect(single).not.toHaveProperty('batchId')
+  })
 })
 
 describe('parseHistory validation', () => {

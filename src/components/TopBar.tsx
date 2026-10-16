@@ -2,7 +2,7 @@ import { useRef, type DragEvent } from 'react'
 import type { HistoryDocMeta } from '../lib/history'
 import { plural } from '../lib/plural'
 import Menu from './Menu'
-import { AlertIcon, BlinderMark, CheckIcon, ClockIcon, UploadIcon } from './icons'
+import { AlertIcon, BlinderMark, CheckIcon, ClockIcon, DownloadIcon, LayersIcon, PlusIcon, TableIcon, UploadIcon } from './icons'
 
 // Сколько последних документов показывать в меню «История». Полный список с
 // удалением остается на стартовом экране.
@@ -23,6 +23,12 @@ interface TopBarProps {
   onShowAllDocs: () => void
   onExportHistory: () => void
   onImportHistory: (file: File) => void
+  // Пакет открытого документа: его документы в порядке загрузки и действия.
+  inBatch: boolean
+  batchDocs: HistoryDocMeta[]
+  onAddToBatch: () => void
+  onExportBatch: () => void
+  onExportBatchCsv: () => void
 }
 
 function formatDate(ms: number): string {
@@ -39,6 +45,7 @@ function TopBar({
   fileName, saveState, isLoading, isDragging, onDragOver, onDragLeave, onDrop,
   onPickFile,
   historyDocs, currentDocId, onOpenDoc, onShowAllDocs, onExportHistory, onImportHistory,
+  inBatch, batchDocs, onAddToBatch, onExportBatch, onExportBatchCsv,
 }: TopBarProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
   const recent = historyDocs.slice(0, RECENT_DOCS)
@@ -107,6 +114,65 @@ function TopBar({
                 <button type="button" className="menu-small" disabled={historyDocs.length === 0} onClick={() => { close(); onExportHistory() }}>Экспорт</button>
                 <button type="button" className="menu-small" onClick={() => { close(); importInputRef.current?.click() }}>Импорт</button>
               </div>
+            </>
+          )}
+        </Menu>
+        <Menu
+          label={inBatch ? `Пакет · ${Math.max(batchDocs.length, 1)}` : 'Пакет'}
+          icon={<LayersIcon />}
+          panelClassName="menu-panel-wide"
+          disabled={isLoading}
+        >
+          {(close) => (
+            <>
+              <p className="menu-note">
+                {inBatch
+                  ? 'Одинаковые значения получают одинаковые метки во всех документах пакета.'
+                  : 'Добавьте связанные документы, например договоры с теми же сторонами, чтобы одинаковые значения получили одинаковые метки во всех файлах.'}
+              </p>
+              {batchDocs.map((doc, index) => {
+                const isCurrent = doc.id === currentDocId
+                return (
+                  <button
+                    type="button"
+                    key={doc.id}
+                    className={`menu-item${isCurrent ? ' is-current' : ''}`}
+                    aria-current={isCurrent ? 'true' : undefined}
+                    onClick={() => { close(); if (!isCurrent) onOpenDoc(doc) }}
+                  >
+                    <span className="menu-item-title" title={doc.name}>{index + 1}. {doc.name}</span>
+                    <span className="menu-item-hint">
+                      {isCurrent ? 'Открыт сейчас' : plural(doc.entityCount, ['находка', 'находки', 'находок'])}
+                    </span>
+                  </button>
+                )
+              })}
+              <button type="button" className="menu-item menu-item-icon" onClick={() => { close(); onAddToBatch() }}>
+                <PlusIcon />
+                <span>
+                  <span className="menu-item-title">Добавить документы в пакет</span>
+                  <span className="menu-item-hint">Файлы .docx и .pdf, можно несколько</span>
+                </span>
+              </button>
+              {inBatch && (
+                <>
+                  <div className="menu-separator" />
+                  <button type="button" className="menu-item menu-item-icon" onClick={() => { close(); onExportBatch() }}>
+                    <DownloadIcon />
+                    <span>
+                      <span className="menu-item-title">Экспортировать пакет одним .md</span>
+                      <span className="menu-item-hint">Документы под заголовками «Документ 1», «Документ 2» без имен файлов</span>
+                    </span>
+                  </button>
+                  <button type="button" className="menu-item menu-item-icon is-sensitive" onClick={() => { close(); onExportBatchCsv() }}>
+                    <TableIcon />
+                    <span>
+                      <span className="menu-item-title">Таблица замен пакета (.csv)</span>
+                      <span className="menu-item-hint">Содержит исходные данные. Не передавайте ее вместе с обезличенным текстом.</span>
+                    </span>
+                  </button>
+                </>
+              )}
             </>
           )}
         </Menu>
