@@ -1,7 +1,7 @@
 import type { Entity } from './types'
 import { entityCurrentValue } from './apply'
 
-function csvEscape(field: string): string {
+export function csvEscape(field: string): string {
   let f = field
   if (/^[=+\-@\t\r]/.test(f)) f = `'${f}`
   if (/["\n\r,]/.test(f)) {

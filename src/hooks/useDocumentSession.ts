@@ -7,7 +7,9 @@ export interface DocumentSnapshot {
   revision: number
 }
 
-export function useDocumentSession(onDirty: (doc: HistoryDoc) => void) {
+// prepare вызывается для каждой правки документа, например чтобы согласовать
+// метки с остальными документами пакета.
+export function useDocumentSession(onDirty: (doc: HistoryDoc) => void, prepare?: (doc: HistoryDoc) => HistoryDoc) {
   const [snapshot, setSnapshot] = useState<DocumentSnapshot>({ doc: null, revision: 0 })
   const snapshotRef = useRef(snapshot)
 
@@ -23,8 +25,9 @@ export function useDocumentSession(onDirty: (doc: HistoryDoc) => void) {
   const edit = useCallback((sourceText: string, entities: Entity[]) => {
     const doc = snapshotRef.current.doc
     if (!doc) return
-    replace({ ...doc, sourceText, entities, updatedAt: Date.now() }, true)
-  }, [replace])
+    const next = { ...doc, sourceText, entities, updatedAt: Date.now() }
+    replace(prepare ? prepare(next) : next, true)
+  }, [replace, prepare])
 
   const setEntities = useCallback((update: Entity[] | ((prev: Entity[]) => Entity[])) => {
     const doc = snapshotRef.current.doc

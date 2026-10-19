@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import type { HistoryDocMeta } from '../lib/history'
 import { plural } from '../lib/plural'
 
@@ -14,6 +14,11 @@ interface HistoryPanelProps {
 
 function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, onImport }: HistoryPanelProps) {
   const importInputRef = useRef<HTMLInputElement>(null)
+  const batchSizes = useMemo(() => {
+    const sizes = new Map<string, number>()
+    for (const doc of docs) if (doc.batchId) sizes.set(doc.batchId, (sizes.get(doc.batchId) ?? 0) + 1)
+    return sizes
+  }, [docs])
 
   const handleImportChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -59,6 +64,7 @@ function HistoryPanel({ docs, currentId, errorText, onOpen, onDelete, onExport, 
             </span>
             <span className="history-meta">
               {new Date(doc.updatedAt).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })} · {plural(doc.entityCount, ['находка', 'находки', 'находок'])} · {doc.format}
+              {doc.batchId && ` · пакет из ${plural(batchSizes.get(doc.batchId) ?? 1, ['документа', 'документов', 'документов'])}`}
             </span>
             <button type="button" onClick={() => onOpen(doc)}>
               {doc.id === currentId ? 'Открыт' : 'Открыть'}
