@@ -654,6 +654,31 @@ test('a freshly uploaded PDF offers to recognize it again through OCR', async ({
   await expect(page.locator('.ocr-retry')).toHaveCount(0)
 })
 
+test('convert-only mode keeps the text as is and does not fetch the NER model', async ({ page }) => {
+  const requested: string[] = []
+  await page.context().route(/^https:\/\//, (route) => {
+    requested.push(route.request().url())
+    return route.abort()
+  })
+  await page.goto('/')
+  const toggle = page.getByRole('checkbox', { name: /Только конвертировать в Markdown/ })
+  await expect(toggle).not.toBeChecked()
+  await toggle.check()
+  await page.locator('input[type=file][accept=".docx,.pdf"]').setInputFiles({
+    name: 'plain.pdf', mimeType: 'application/pdf', buffer: syntheticPdf('Write to alice@example.test today'),
+  })
+  await expect(page.locator('.cm-content')).toContainText('alice@example.test', { timeout: 30_000 })
+  await expect(page.locator('.convert-notice')).toContainText('только сконвертирован')
+  await expect(page.locator('.ner-notice')).toHaveCount(0)
+  await showResult(page)
+  await expect(page.locator('.anonymized-preview')).toContainText('Write to alice@example.test today')
+  expect(requested.filter((url) => url.includes('huggingface'))).toEqual([])
+
+  // The choice survives a reload.
+  await page.reload()
+  await expect(page.getByRole('checkbox', { name: /Только конвертировать в Markdown/ })).toBeChecked()
+})
+
 test('several files uploaded together share placeholders across the package', async ({ page }) => {
   // Without the NER model only rule-based data is found, which is enough here.
   await page.context().route(/^https:\/\//, (route) => route.abort())

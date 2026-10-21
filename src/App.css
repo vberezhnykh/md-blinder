@@ -553,6 +553,7 @@ button.primary:hover:not(:disabled) {
 }
 
 .ner-notice,
+.convert-notice,
 .image-notice {
   margin-top: 12px;
   padding: 10px 14px;
@@ -641,6 +642,16 @@ button.primary:hover:not(:disabled) {
   cursor: pointer;
 }
 .side-by-side-option input { margin: 0; }
+
+.convert-only-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.convert-only-option input { margin: 0; }
 
 /* Editor gets the lion's share of the width; the entity pane is a fixed,
    narrower column. Both panes stick to the top and cap at the viewport height,

@@ -61,11 +61,13 @@ class FileRejected extends Error {}
 async function analyzeFile(file: File, options: {
   signal: AbortSignal
   forceOcr: boolean
+  // Только Markdown: поиск персональных данных не запускается, модель NER не грузится.
+  convertOnly: boolean
   batchId?: string
   members: HistoryDoc[]
   onProgress: (p: Progress) => void
 }): Promise<{ doc: HistoryDoc; nerFailed: boolean }> {
-  const { signal, forceOcr, batchId, members, onProgress } = options
+  const { signal, forceOcr, convertOnly, batchId, members, onProgress } = options
   const kind = await detectFileKind(file)
   signal.throwIfAborted()
   if (kind === 'legacy-doc') {
@@ -93,6 +95,16 @@ async function analyzeFile(file: File, options: {
     md = result.markdown
   }
   signal.throwIfAborted()
+  const now = Date.now()
+  if (convertOnly) {
+    return {
+      doc: {
+        id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now, updatedAt: now,
+        sourceText: md, entities: [], ...(batchId ? { batchId } : {}),
+      },
+      nerFailed: false,
+    }
+  }
   const { result, nerFailed } = await anonymizeMarkdown(md, (p) => onProgress(toProgress(p)), signal)
   signal.throwIfAborted()
   const seeded = seedFromBatch(md, result.entities, members)
@@ -100,7 +112,6 @@ async function analyzeFile(file: File, options: {
   // без ОПФ) ищутся правилами без NER, поэтому их можно предложить сразу.
   const related = findRelatedOccurrences(md, seeded)
   const entities = reconcileBatchPlaceholders([...seeded, ...related], md, members)
-  const now = Date.now()
   return {
     doc: {
       id: crypto.randomUUID(), name: file.name, format: kind, createdAt: now, updatedAt: now,
@@ -144,6 +155,9 @@ function App() {
   const entities = snapshot.doc?.entities ?? EMPTY_ENTITIES
   const currentDocId = snapshot.doc?.id ?? null
   const [nerNotice, setNerNotice] = useState(false)
+  const [convertOnly, setConvertOnly] = useStoredFlag('md-blinder:convert-only', false)
+  // Открытый документ только что сконвертирован без поиска персональных данных.
+  const [convertNotice, setConvertNotice] = useState(false)
   const [hasResult, setHasResult] = useState(false)
   // Вид в одной колонке: исходник или результат. В широком окне они стоят рядом.
   const [view, setView] = useState<'source' | 'result'>('source')
@@ -242,6 +256,7 @@ function App() {
       }
       setFileName(meta.name)
       setNerNotice(false)
+      setConvertNotice(false)
       setView('source')
       setSideTab(null)
       setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
@@ -356,6 +371,7 @@ function App() {
     setElapsedSec(0)
     setFileName(files.length === 1 ? files[0].name : plural(files.length, ['файл', 'файла', 'файлов']))
     setNerNotice(false)
+    setConvertNotice(false)
     setView('source')
     setHasResult(false)
 
@@ -373,7 +389,7 @@ function App() {
         setProgress(null)
         try {
           const analyzed = await analyzeFile(file, {
-            signal: job.signal, forceOcr, batchId, members,
+            signal: job.signal, forceOcr, convertOnly, batchId, members,
             onProgress: (p) => { if (job.isCurrent()) setProgress(p) },
           })
           if (!job.isCurrent()) return
@@ -399,6 +415,7 @@ function App() {
       setFileName(opened.name)
       setLastPdf(files.length === 1 && opened.format === 'pdf' ? { file: files[0], docId: opened.id, ocrForced: forceOcr } : null)
       setNerNotice(nerFailed)
+      setConvertNotice(convertOnly)
       setView('source')
       setSideTab(null)
       setActiveCandidate((prev) => ({ id: null, nonce: prev.nonce }))
@@ -407,8 +424,11 @@ function App() {
       if (failures.length > 0) {
         showToast({ text: `Обработаны не все файлы. ${failures.join(' ')}`, tone: 'warn', durationMs: 12000 })
       } else if (batchId && members.length > 1) {
+        const count = plural(members.length, ['документ', 'документа', 'документов'])
         showToast({
-          text: `В пакете ${plural(members.length, ['документ', 'документа', 'документов'])}: одинаковые значения заменены одинаковыми метками во всех. Остальные документы пакета открываются из меню «Пакет».`,
+          text: convertOnly
+            ? `В пакете ${count}. Остальные документы пакета открываются из меню «Пакет».`
+            : `В пакете ${count}: одинаковые значения заменены одинаковыми метками во всех. Остальные документы пакета открываются из меню «Пакет».`,
           durationMs: 8000,
         })
       }
@@ -420,7 +440,7 @@ function App() {
       setBatchStep(null)
       job.finish()
     }
-  }, [cancelAnalysis, startJob, flush, replace, queueSave, showToast])
+  }, [cancelAnalysis, startJob, flush, replace, queueSave, showToast, convertOnly])
 
   // Текстовый слой PDF может быть испорчен (сломанная кодировка шрифтов, ошибки
   // старого OCR). Автоматика ему доверяет, а битый текст виден только в
@@ -729,6 +749,15 @@ function App() {
             </p>
             {fileName && <p className="filename">Файл: {fileName}</p>}
           </div>
+          <label className="convert-only-option">
+            <input
+              type="checkbox"
+              checked={convertOnly}
+              disabled={isLoading}
+              onChange={(event) => setConvertOnly(event.target.checked)}
+            />
+            Только конвертировать в Markdown, без поиска персональных данных
+          </label>
         </div>
       )}
 
@@ -814,6 +843,13 @@ function App() {
               Модель распознавания имен, компаний и адресов не загрузилась (при первом запуске нужен
               интернет). Найдены только данные, которые определяются по шаблону: телефоны, email,
               реквизиты, номера документов.
+            </p>
+          )}
+          {convertNotice && (
+            <p className="convert-notice">
+              Документ только сконвертирован в Markdown: поиск персональных данных выключен на стартовом
+              экране. Копирование и экспорт дают текст без замен. Данные можно отметить вручную, выделив их
+              в исходнике.
             </p>
           )}
           {imageCount > 0 && <p className="image-notice">
